@@ -1,0 +1,121 @@
+"""Constants for the Music Assembler player and song format.
+
+Values follow the decompiled Music Assembler player (Richard Bayliss /
+Eric Campbell era), cross-checked byte-exact against the
+``preframr-sidtrace`` register oracle.  The player code is identical
+across Music Assembler tunes; only its DATA (orderlists, patterns,
+instruments and the addresses they live at) differs per tune.
+"""
+
+# SID register map (offsets within the chip's 25 registers).
+SID_REGISTERS = 25
+VOICES = 3
+VOICE_REG_SIZE = 7
+FREQ_LO_REG = 0x00
+FREQ_HI_REG = 0x01
+PW_LO_REG = 0x02
+PW_HI_REG = 0x03
+CTRL_REG = 0x04
+AD_REG = 0x05
+SR_REG = 0x06
+FC_HI_REG = 0x16
+RES_FILT_REG = 0x17
+MODE_VOL_REG = 0x18
+
+# Per-voice SID base offsets ($D400 + offset).
+SID_OFFSET = (0, 7, 14)
+
+# Pulse-width high registers carry only their low nibble (12-bit pulse).
+PW_HI_REGS = (PW_HI_REG, PW_HI_REG + 7, PW_HI_REG + 14)
+
+# Pattern byte grammar boundaries.
+NOTE_MAX = 0x5F  # < 0x60: a note (+ trailing control byte)
+DUR_MIN = 0x60  # 0x60..0x7F: bare duration token
+INSTR_MIN = 0x80  # 0x80..0x9F: instrument select (id = value & 0x1F)
+INSTR_MAX = 0x9F
+LONGDUR_MIN = 0xA0  # 0xA0..0xFE: long-duration token (dur = value & 0x1F)
+PATTERN_END = 0xFF
+ORDER_END = 0xFF  # orderlist terminator -> loop to start
+SILENCE_PATTERN = 0xFE  # orderlist pattern id $FE: gate off, no row
+
+# Note-control byte ($1141) bit meanings (the byte after a note).
+CTL_FILTER = 0x80  # inline filter command attached
+CTL_VIBARP = 0x20  # inline vibrato/arp params attached
+CTL_TRIGGERED = 0x40  # note-trigger latch (set after the trigger frame)
+CTL_DUR_MASK = 0x1F
+
+# Instrument record byte offsets (8-byte record).
+INSTR_RECORD_SIZE = 8
+INSTR_AD = 0
+INSTR_SR = 1
+INSTR_WAVEFORM = 2
+INSTR_PULSE_INIT = 3
+INSTR_PULSE_STEP = 4
+INSTR_ARP_SPEED = 5
+INSTR_ARP_STEP = 6
+INSTR_PORTA = 7
+
+# Player constants recovered from the disassembly.
+TEMPO_DIVIDER = 2  # play-call divider ($1090 reset value)
+FILTER_STEP = 0xF0  # cutoff sweep increment per owner frame ($129e += step)
+FILTER_CTR = 0x29  # cutoff sweep gate-counter reset ($1296)
+RES_PRESETS = (0xF1, 0xF7, 0xF7)  # per-voice RES_FILT preset ($12b3)
+
+# Player-code operand offsets-from-load.  The player binary is identical
+# across Music Assembler tunes, so each pointer-table base address lives
+# at a fixed offset in the code; the reader reads the 16-bit operand
+# there to discover the per-tune table base (relocation-safe).
+OP_PATTERN_LO = 0x081  # pattern pointer table, low bytes
+OP_PATTERN_HI = 0x086  # pattern pointer table, high bytes
+OP_ORDER_LO = 0x173  # orderlist pointer table, low bytes
+OP_ORDER_HI = 0x178  # orderlist pointer table, high bytes
+OP_INSTR = 0x215  # instrument record table base
+OP_FREQ_LO = 0x0EC  # frequency table, low bytes
+OP_FREQ_HI = 0x0F5  # frequency table, high bytes
+OP_INNER_LO = 0x3C6  # instrument inner (effect program) pointer table, low
+OP_INNER_HI = 0x3CB  # instrument inner pointer table, high
+OP_ARP = 0x2C2  # 4-entry arp direction table
+
+# Fixed table sizes the reader extracts.
+FREQ_TABLE_LEN = 96  # note frequency table entries
+
+# C64 timing. A PAL frame is 312 rasterlines x 63 cycles.
+PAL_CLOCK_HZ = 985248
+PAL_CYCLES_PER_FRAME = 19656
+NTSC_CLOCK_HZ = 1022727
+NTSC_CYCLES_PER_FRAME = 17095
+
+# Standard Music Assembler entry points (PSID header normally matches).
+DEFAULT_LOAD = 0x1021
+DEFAULT_INIT = 0x1048
+DEFAULT_PLAY = 0x1021
+
+# Per-voice work-RAM absolute addresses (voice index added).  The init
+# routine ($1048) zeroes only $1081..$1090 (pat_cursor / ctrl /
+# order_cursor / dur / pattern_id) and then reloads pattern_id / transrep
+# / repeat from each voice's orderlist; EVERY other work-RAM byte keeps
+# its loaded-image value.  A tune saved mid-playback bakes live values
+# into these addresses, so the player seeds its voice state from the
+# image here -- otherwise its first frames diverge from the oracle.
+WORK_MASTER_TEMPO = 0x1090  # global play-call tempo counter
+WORK_FILTER_OWNER = 0x1262  # filter-sweep owner voice
+WORK_NOTE_INDEX = 0x10C9
+WORK_FREQ_LO = 0x10CC
+WORK_FREQ_HI = 0x10CF
+WORK_ARP_SUBSTEP = 0x10DD
+WORK_PW_SUBSTEP = 0x10E0
+WORK_PW_DIR = 0x10E3
+WORK_NOTE_CTL = 0x1141
+WORK_INSTR_CURSOR = 0x1144
+WORK_VIB_LO_STEP = 0x1147
+WORK_VIB_HI_STEP = 0x114A
+WORK_PORTA_CTR = 0x114D
+WORK_VIB_FREQ_HI = 0x12B6
+WORK_VIB_TOGGLE = 0x12B9
+WORK_ARP_PHASE = 0x12BD
+WORK_INSTR_X8 = 0x13D9
+WORK_PW_LO = 0x13DC
+WORK_PW_HI = 0x13DF
+WORK_VIB_FREQ_LO = 0x13E2
+WORK_CTRL_MASK = 0x1031
+WORK_FLAGS = 0x00FD  # zero-page; outside the image -> defaults to 0
