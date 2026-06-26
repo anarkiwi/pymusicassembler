@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Music Assembler test tunes are HVSC copyright works -- never committed.
+tests/.tunecache/
+*.sid
+*.prg
+*.wav
+*.sidwr.bin
