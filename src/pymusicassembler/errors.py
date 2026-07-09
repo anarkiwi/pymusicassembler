@@ -1,7 +1,9 @@
 """Exceptions raised by pymusicassembler."""
 
+from pysidtracker import SidError
 
-class MusicAssemblerError(Exception):
+
+class MusicAssemblerError(SidError):
     """Base class for all pymusicassembler errors."""
 
 

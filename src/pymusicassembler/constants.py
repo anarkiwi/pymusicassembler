@@ -37,6 +37,10 @@ LONGDUR_MIN = 0xA0  # 0xA0..0xFE: long-duration token (dur = value & 0x1F)
 PATTERN_END = 0xFF
 ORDER_END = 0xFF  # orderlist terminator -> loop to start
 SILENCE_PATTERN = 0xFE  # orderlist pattern id $FE: gate off, no row
+# A real orderlist is at most a few hundred entries (HVSC max 471 entries =
+# 942 bytes); a bad table base walks forever, so a terminator must appear
+# within this many bytes or the tune is treated as an unsupported variant.
+ORDER_MAX_BYTES = 0x1000
 
 # Note-control byte ($1141) bit meanings (the byte after a note).
 CTL_FILTER = 0x80  # inline filter command attached

@@ -17,7 +17,7 @@ from pymusicassembler.model import (
     Song,
 )
 from pymusicassembler.player import Player, iter_frames, render_grid
-from pymusicassembler.reader import parse, read
+from pymusicassembler.reader import MusicAssemblerSidParser, parse, read
 from pymusicassembler.reglog import (
     RegWrite,
     iter_register_writes,
@@ -33,6 +33,7 @@ __all__ = [
     "Instrument",
     "InstrumentEvent",
     "MusicAssemblerError",
+    "MusicAssemblerSidParser",
     "NoteEvent",
     "OrderEntry",
     "Orderlist",
