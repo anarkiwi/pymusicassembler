@@ -2,16 +2,20 @@
 
 A PSID/RSID container wraps the raw C64 image (player code + song data)
 with a header giving the load/init/play addresses.  The Music Assembler
-player binary is identical across tunes; only its DATA differs, and each
-pointer-table base address lives at a fixed offset in the player code as
-a 16-bit instruction operand.  The reader reads those operands to
-discover the per-tune table bases (relocation-safe -- no fixed-address
-assumption), then follows them to extract the orderlists, patterns,
-instruments and note-frequency tables.
+player binary is relocated per tune (across HVSC the same player loads at
+$1000, $c000, ... -- only a handful load at the $1021 the original fixed
+operand offsets were calibrated to), so a pointer-table base cannot be
+read at a fixed image offset.  The reader instead locates each
+table-loading instruction by its opcode skeleton (a relocation-invariant
+signature) and reads the base from its operand, then follows the bases to
+extract the orderlists, patterns, instruments and note-frequency tables.
+An unsupported player variant (no signature match, or a base outside the
+loaded image) raises :class:`SidParseError` rather than yielding garbage.
 """
 
+import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from pysidtracker import BaseSidParser, SidError, SidImage
 
@@ -56,26 +60,91 @@ def _parse_container(
     return load, init, play, name, author, released, img.image, img.container
 
 
-def _op16(image: bytes, off: int) -> int:
-    if off + 1 < len(image):
-        return image[off] | (image[off + 1] << 8)
-    raise SidParseError(f"operand offset {off:#x} past end of image")
+def _w16(operand: bytes) -> int:
+    return operand[0] | (operand[1] << 8)
 
 
-def _discover_bases(image: bytes) -> dict:
-    """Discover per-tune table base addresses from player-code operands."""
+# Player-code instruction signatures for each table-base operand.  The
+# Music Assembler player is relocated per tune (HVSC tunes load at $1000,
+# $c000, ... -- only 75 of ~6500 load at the $1021 the fixed operand
+# offsets were calibrated to), so a base cannot be read at a fixed offset.
+# Each base is instead read from the operand of the ``LDA table,X/Y`` that
+# consumes it, located by the instruction's opcode skeleton (operand bytes
+# wildcarded).  The store targets that anchor them are relocation-invariant:
+# the orderlist/pattern pointers land in zero page ($fa/$fb) which never
+# moves, and the frequency work registers keep their +3 (per-voice) stride.
+_SIG_ORDER = re.compile(rb"\xbd(..)\x85\xfa\xbd(..)\x85\xfb", re.S)  # LDA a,X;STA $fa
+_SIG_PATTERN = re.compile(rb"\xb9(..)\x85\xfa\xb9(..)\x85\xfb", re.S)  # LDA a,Y;STA $fa
+_SIG_INSTR = re.compile(
+    rb"\x9d(..)\xb9(..)\x85\xfa", re.S
+)  # STA a,X;LDA instr,Y;STA $fa
+_SIG_FREQ = re.compile(rb"\xb9(..)\x9d(..)\xb9(..)\x9d(..)", re.S)  # two LDA,Y;STA,X
+
+
+def _find_freq(image: bytes) -> Optional[re.Match]:
+    """First ``LDA freq_lo,Y; STA work; LDA freq_hi,Y; STA work+3`` pair.
+
+    The two per-voice frequency work registers are three bytes apart in
+    every build, so the +3 store stride identifies the frequency loads
+    without depending on their (relocated) absolute work-RAM address.
+    """
+    for match in _SIG_FREQ.finditer(image):
+        if _w16(match.group(4)) == _w16(match.group(2)) + 3:
+            return match
+    return None
+
+
+def _match_signatures(image: bytes) -> dict:
+    """Locate the four table-load instruction signatures in ``image``.
+
+    Returns a dict of the (still-present-or-``None``) match objects, so
+    both :func:`_discover_bases` and the parser's ``recognize`` predicate
+    share one signature scan.
+    """
     return {
-        "order_lo": _op16(image, constants.OP_ORDER_LO),
-        "order_hi": _op16(image, constants.OP_ORDER_HI),
-        "pattern_lo": _op16(image, constants.OP_PATTERN_LO),
-        "pattern_hi": _op16(image, constants.OP_PATTERN_HI),
-        "instr": _op16(image, constants.OP_INSTR),
-        "freq_lo": _op16(image, constants.OP_FREQ_LO),
-        "freq_hi": _op16(image, constants.OP_FREQ_HI),
-        "inner_lo": _op16(image, constants.OP_INNER_LO),
-        "inner_hi": _op16(image, constants.OP_INNER_HI),
-        "arp": _op16(image, constants.OP_ARP),
+        "order": _SIG_ORDER.search(image),
+        "pattern": _SIG_PATTERN.search(image),
+        "instr": _SIG_INSTR.search(image),
+        "freq": _find_freq(image),
     }
+
+
+def _discover_bases(image: bytes, load: int) -> dict:
+    """Discover per-tune table base addresses from player-code operands.
+
+    Raises :class:`SidParseError` when the player-code signatures are
+    absent (an unsupported Music Assembler variant) or when a discovered
+    base falls outside the loaded image (a spurious match).
+    """
+    sig = _match_signatures(image)
+    order, pattern, instr, freq = (
+        sig["order"],
+        sig["pattern"],
+        sig["instr"],
+        sig["freq"],
+    )
+    if not all((order, pattern, instr, freq)):
+        missing = ",".join(name for name, match in sig.items() if match is None)
+        raise SidParseError(
+            f"player signatures not found ({missing}); unsupported variant"
+        )
+    bases = {
+        "order_lo": _w16(order.group(1)),
+        "order_hi": _w16(order.group(2)),
+        "pattern_lo": _w16(pattern.group(1)),
+        "pattern_hi": _w16(pattern.group(2)),
+        "instr": _w16(instr.group(2)),
+        "freq_lo": _w16(freq.group(1)),
+        "freq_hi": _w16(freq.group(3)),
+    }
+    end = load + len(image)
+    for name, base in bases.items():
+        if not load <= base < end:
+            raise SidParseError(
+                f"discovered {name} base {base:#06x} outside image "
+                f"[{load:#06x},{end:#06x}); unsupported variant"
+            )
+    return bases
 
 
 def _load_view(image: bytes, load: int) -> SidImage:
@@ -90,19 +159,17 @@ def _load_view(image: bytes, load: int) -> SidImage:
 def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
     addr = img.ptr(bases["order_lo"], bases["order_hi"], voice)
     entries: List[OrderEntry] = []
-    cur = 0
-    seen = set()
-    while True:
-        if cur in seen:  # defensive: never loop forever on a malformed list
-            break
-        seen.add(cur)
+    for cur in range(0, constants.ORDER_MAX_BYTES, 2):
         pid = img.peek(addr + cur)
         if pid == constants.ORDER_END:
-            break
+            return Orderlist(entries=entries)
         ctl = img.peek(addr + cur + 1)
         entries.append(OrderEntry.from_bytes(pid, ctl))
-        cur += 2
-    return Orderlist(entries=entries)
+    # No terminator within the bound: a wrong base or unsupported variant.
+    raise SidParseError(
+        f"orderlist for voice {voice} at {addr:#06x} has no terminator "
+        f"within {constants.ORDER_MAX_BYTES} bytes; unsupported variant"
+    )
 
 
 def _parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
@@ -171,7 +238,7 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
 def parse(data: bytes) -> Song:
     """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song."""
     load, init, play, name, author, released, image, header = _parse_container(data)
-    bases = _discover_bases(image)
+    bases = _discover_bases(image, load)
     img = _load_view(image, load)
 
     orderlists = [
@@ -229,12 +296,29 @@ class MusicAssemblerSidParser(BaseSidParser):
     """:class:`pysidtracker.BaseSidParser` adapter for the shared API.
 
     ``parse``/``read`` yield the same :class:`~pymusicassembler.model.Song`
-    as the module-level :func:`parse`/:func:`read`.  ``recognize`` is left as
-    the inherited default (no reliable static player signature is asserted),
-    so ``detect`` reports ``PlayroutineKind.UNKNOWN`` rather than a guess.
+    as the module-level :func:`parse`/:func:`read`.  ``recognize`` reports the
+    player statically: it returns the order-signature offset when all four
+    table-load instruction signatures are present in the loaded image, so
+    ``detect`` classifies a direct-load Music Assembler tune as
+    ``PlayroutineKind.DIRECT`` (and packed/relocating variants once init runs).
     """
 
     error_class = SidParseError
 
     def parse(self, data: bytes, **kwargs) -> Song:
         return parse(data)
+
+    def recognize(self, image: SidImage) -> object:
+        """Return the order-signature offset if the MA player is present.
+
+        The four table-load instruction signatures (order/pattern/instr/freq
+        stores) together are specific to the Music Assembler player; requiring
+        all four avoids false positives.  Searches the currently loaded image
+        region, so it also recognises the player after ``detect`` runs init
+        for a packed/relocating tune.
+        """
+        region = bytes(image.mem[image.load : image.end])
+        sig = _match_signatures(region)
+        if all(sig.values()):
+            return image.load + sig["order"].start()
+        return None
