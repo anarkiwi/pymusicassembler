@@ -13,11 +13,18 @@ An unsupported player variant (no signature match, or a base outside the
 loaded image) raises :class:`SidParseError` rather than yielding garbage.
 """
 
-import re
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from pysidtracker import BaseSidParser, SidError, SidImage
+from pysidtracker import (
+    BaseSidParser,
+    CodePattern,
+    Match,
+    SidError,
+    SidImage,
+    find_code_all,
+    find_code_first,
+)
 
 from pymusicassembler import constants
 from pymusicassembler.errors import SidParseError
@@ -60,63 +67,67 @@ def _parse_container(
     return load, init, play, name, author, released, img.image, img.container
 
 
-def _w16(operand: bytes) -> int:
-    return operand[0] | (operand[1] << 8)
-
-
 # Player-code instruction signatures for each table-base operand.  The
 # Music Assembler player is relocated per tune (HVSC tunes load at $1000,
 # $c000, ... -- only 75 of ~6500 load at the $1021 the fixed operand
 # offsets were calibrated to), so a base cannot be read at a fixed offset.
 # Each base is instead read from the operand of the ``LDA table,X/Y`` that
-# consumes it, located by the instruction's opcode skeleton (operand bytes
-# wildcarded).  The store targets that anchor them are relocation-invariant:
-# the orderlist/pattern pointers land in zero page ($fa/$fb) which never
-# moves, and the frequency work registers keep their +3 (per-voice) stride.
-_SIG_ORDER = re.compile(rb"\xbd(..)\x85\xfa\xbd(..)\x85\xfb", re.S)  # LDA a,X;STA $fa
-_SIG_PATTERN = re.compile(rb"\xb9(..)\x85\xfa\xb9(..)\x85\xfb", re.S)  # LDA a,Y;STA $fa
-_SIG_INSTR = re.compile(
-    rb"\x9d(..)\xb9(..)\x85\xfa", re.S
-)  # STA a,X;LDA instr,Y;STA $fa
-_SIG_FREQ = re.compile(rb"\xb9(..)\x9d(..)\xb9(..)\x9d(..)", re.S)  # two LDA,Y;STA,X
+# consumes it, located by the instruction's opcode skeleton (operand words
+# captured, wildcarded).  The store targets that anchor them are
+# relocation-invariant: the orderlist/pattern pointers land in zero page
+# ($fa/$fb) which never moves, and the frequency work registers keep their
+# +3 (per-voice) stride.
+_PAT_ORDER = CodePattern(
+    "BD {order_lo:w} 85 FA BD {order_hi:w} 85 FB"
+)  # LDA a,X;STA $fa
+_PAT_PATTERN = CodePattern(
+    "B9 {pattern_lo:w} 85 FA B9 {pattern_hi:w} 85 FB"
+)  # LDA a,Y;STA $fa
+_PAT_INSTR = CodePattern("9D ?? ?? B9 {instr:w} 85 FA")  # STA a,X;LDA instr,Y;STA $fa
+_PAT_FREQ = CodePattern(
+    "B9 {freq_lo:w} 9D {work_lo:w} B9 {freq_hi:w} 9D {work_hi:w}"
+)  # two LDA,Y;STA,X
 
 
-def _find_freq(image: bytes) -> Optional[re.Match]:
+def _find_freq(image: SidImage, start: int, end: int) -> Optional[Match]:
     """First ``LDA freq_lo,Y; STA work; LDA freq_hi,Y; STA work+3`` pair.
 
     The two per-voice frequency work registers are three bytes apart in
     every build, so the +3 store stride identifies the frequency loads
     without depending on their (relocated) absolute work-RAM address.
     """
-    for match in _SIG_FREQ.finditer(image):
-        if _w16(match.group(4)) == _w16(match.group(2)) + 3:
+    for match in find_code_all(image, _PAT_FREQ, start=start, end=end):
+        if match.captures["work_hi"] == match.captures["work_lo"] + 3:
             return match
     return None
 
 
-def _match_signatures(image: bytes) -> dict:
+def _match_signatures(
+    image: SidImage, start: int, end: int
+) -> Dict[str, Optional[Match]]:
     """Locate the four table-load instruction signatures in ``image``.
 
-    Returns a dict of the (still-present-or-``None``) match objects, so
-    both :func:`_discover_bases` and the parser's ``recognize`` predicate
-    share one signature scan.
+    Returns a dict of the (still-present-or-``None``) matches over
+    ``[start, end)``, so both :func:`_discover_bases` and the parser's
+    ``recognize`` predicate share one signature scan.
     """
     return {
-        "order": _SIG_ORDER.search(image),
-        "pattern": _SIG_PATTERN.search(image),
-        "instr": _SIG_INSTR.search(image),
-        "freq": _find_freq(image),
+        "order": find_code_first(image, _PAT_ORDER, start=start, end=end),
+        "pattern": find_code_first(image, _PAT_PATTERN, start=start, end=end),
+        "instr": find_code_first(image, _PAT_INSTR, start=start, end=end),
+        "freq": _find_freq(image, start, end),
     }
 
 
-def _discover_bases(image: bytes, load: int) -> dict:
+def _discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     """Discover per-tune table base addresses from player-code operands.
 
     Raises :class:`SidParseError` when the player-code signatures are
     absent (an unsupported Music Assembler variant) or when a discovered
     base falls outside the loaded image (a spurious match).
     """
-    sig = _match_signatures(image)
+    end = load + image_len
+    sig = _match_signatures(image, load, end)
     order, pattern, instr, freq = (
         sig["order"],
         sig["pattern"],
@@ -129,15 +140,14 @@ def _discover_bases(image: bytes, load: int) -> dict:
             f"player signatures not found ({missing}); unsupported variant"
         )
     bases = {
-        "order_lo": _w16(order.group(1)),
-        "order_hi": _w16(order.group(2)),
-        "pattern_lo": _w16(pattern.group(1)),
-        "pattern_hi": _w16(pattern.group(2)),
-        "instr": _w16(instr.group(2)),
-        "freq_lo": _w16(freq.group(1)),
-        "freq_hi": _w16(freq.group(3)),
+        "order_lo": order.captures["order_lo"],
+        "order_hi": order.captures["order_hi"],
+        "pattern_lo": pattern.captures["pattern_lo"],
+        "pattern_hi": pattern.captures["pattern_hi"],
+        "instr": instr.captures["instr"],
+        "freq_lo": freq.captures["freq_lo"],
+        "freq_hi": freq.captures["freq_hi"],
     }
-    end = load + len(image)
     for name, base in bases.items():
         if not load <= base < end:
             raise SidParseError(
@@ -238,8 +248,8 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
 def parse(data: bytes) -> Song:
     """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song."""
     load, init, play, name, author, released, image, header = _parse_container(data)
-    bases = _discover_bases(image, load)
     img = _load_view(image, load)
+    bases = _discover_bases(img, load, len(image))
 
     orderlists = [
         _parse_orderlist(img, bases, voice) for voice in range(constants.VOICES)
@@ -317,8 +327,7 @@ class MusicAssemblerSidParser(BaseSidParser):
         region, so it also recognises the player after ``detect`` runs init
         for a packed/relocating tune.
         """
-        region = bytes(image.mem[image.load : image.end])
-        sig = _match_signatures(region)
+        sig = _match_signatures(image, image.load, image.end)
         if all(sig.values()):
-            return image.load + sig["order"].start()
+            return sig["order"].addr
         return None
