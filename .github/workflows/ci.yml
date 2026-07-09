@@ -25,11 +25,21 @@ jobs:
         run: black --check src/pymusicassembler tests scripts
       - name: pylint
         run: pylint src/pymusicassembler tests scripts
+      - name: Cache HVSC tunes
+        # HVSC tunes are copyright and never committed; the corpus/player tests
+        # fetch them from the mirror into a gitignored cache.  Cache that dir
+        # across runs, keyed on the corpus list + fetch script so a changed
+        # sample invalidates it.
+        uses: actions/cache@v4
+        with:
+          path: tests/.tunecache
+          key: hvsc-tunes-${{ hashFiles('tests/fixtures/ma_corpus.txt', 'scripts/fetch_tunes.py') }}
       - name: pytest + coverage (> 85%)
         # Tunes are HVSC copyright works (never committed); CI has no
         # SIDTRACE_BIN, so the byte-exact player tests validate against the
         # committed frozen oracle grids, and tune-dependent tests fetch from
-        # the HVSC mirror (skipping cleanly if the mirror is unreachable).
+        # the HVSC mirror into the cached tunecache (retrying transient
+        # failures; skipping an individual tune only if truly unreachable).
         run: pytest --cov=pymusicassembler --cov-report=term-missing --cov-fail-under=85
 
   build:

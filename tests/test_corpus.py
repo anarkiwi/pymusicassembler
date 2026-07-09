@@ -15,12 +15,18 @@ real when the local tree is present.
 """
 
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from pymusicassembler import constants
 from pymusicassembler.reader import MusicAssemblerSidParser, read
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO / "scripts"))
+
+import fetch_tunes  # noqa: E402  (after sys.path tweak)
 
 try:  # detect() classification is only asserted when pysidtracker exposes it
     from pysidtracker import PlayroutineKind
@@ -52,7 +58,13 @@ def _sample_relpaths():
 
 
 def _locate(relpath):
-    """Absolute path to ``relpath`` under HVSC or the tunecache, or ``None``."""
+    """Absolute path to ``relpath`` under HVSC, the tunecache, or the mirror.
+
+    Prefers a local HVSC tree (``$HVSC``) and the gitignored tunecache; when
+    neither has the tune it is fetched from the HVSC mirror into the cache
+    (with retries).  Returns ``None`` only when the tune is genuinely
+    unreachable after retries, so an individual tune skips cleanly.
+    """
     root = _hvsc_root()
     if root is not None:
         cand = root / relpath
@@ -61,7 +73,10 @@ def _locate(relpath):
     cand = TUNECACHE / relpath
     if cand.exists():
         return cand
-    return None
+    try:
+        return fetch_tunes.fetch(relpath)
+    except Exception:  # pylint: disable=broad-except  # unreachable -> skip
+        return None
 
 
 SAMPLE = _sample_relpaths()
