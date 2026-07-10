@@ -40,7 +40,7 @@ jobs:
         # committed frozen oracle grids, and tune-dependent tests fetch from
         # the HVSC mirror into the cached tunecache (retrying transient
         # failures; skipping an individual tune only if truly unreachable).
-        run: pytest --cov=pymusicassembler --cov-report=term-missing --cov-fail-under=85
+        run: pytest -n auto --cov=pymusicassembler --cov-report=term-missing --cov-fail-under=85
 
   build:
     runs-on: ubuntu-latest
