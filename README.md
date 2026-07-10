@@ -3,7 +3,9 @@
 Pure-Python reader, writer, and player for
 [Music Assembler](https://www.codebase64.org/) C64 SID songs (the Richard
 Bayliss / Eric Campbell era player), with byte-exact per-frame SID register
-output, WAV rendering through an emulated SID, and byte-identical write-back.
+output, WAV rendering through an emulated SID, byte-identical write-back, and
+export to the native Music Assembler editor song format (the `S.` files the
+Triad v1.4 editor loads).
 
 Consumes `.sid` files (PSID/RSID containers) and bare `.prg` images through the
 shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) base: the

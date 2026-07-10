@@ -87,6 +87,11 @@ _PAT_INSTR = CodePattern("9D ?? ?? B9 {instr:w} 85 FA")  # STA a,X;LDA instr,Y;S
 _PAT_FREQ = CodePattern(
     "B9 {freq_lo:w} 9D {work_lo:w} B9 {freq_hi:w} 9D {work_hi:w}"
 )  # two LDA,Y;STA,X
+# Play-routine entry: ``LDX #0; DEC tempo; BMI +$0c; JSR``.  The tempo
+# prescaler cell is base+$90, so ``base = tempo - $90`` locates the player
+# base independent of relocation (used to emit the native self-starting
+# format at ``base``, where the play routine sits at base+$21).
+_PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
 
 
 def _find_freq(image: SidImage, start: int, end: int) -> Optional[Match]:
@@ -108,7 +113,7 @@ def _match_signatures(
     """Locate the four table-load instruction signatures in ``image``.
 
     Returns a dict of the (still-present-or-``None``) matches over
-    ``[start, end)``, so both :func:`_discover_bases` and the parser's
+    ``[start, end)``, so both :func:`discover_bases` and the parser's
     ``recognize`` predicate share one signature scan.
     """
     return {
@@ -119,7 +124,7 @@ def _match_signatures(
     }
 
 
-def _discover_bases(image: SidImage, load: int, image_len: int) -> dict:
+def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     """Discover per-tune table base addresses from player-code operands.
 
     Raises :class:`SidParseError` when the player-code signatures are
@@ -157,13 +162,32 @@ def _discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     return bases
 
 
-def _load_view(image: bytes, load: int) -> SidImage:
+def load_view(image: bytes, load: int) -> SidImage:
     """Absolute-addressed read view of ``image`` placed at ``load``.
 
     Uses :class:`pysidtracker.SidImage`; ``peek`` returns 0 out of range,
     matching the reader's reliance on a zero fallback.
     """
     return SidImage.from_prg(bytes((load & 0xFF, load >> 8)) + image)
+
+
+def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int]:
+    """Locate the player base address, or ``None`` if the layout is
+    non-standard.
+
+    The play routine's tempo-prescaler cell is ``base + 0x90``, found from
+    the ``LDX #0; DEC tempo`` play entry (:data:`_PAT_PLAY`).  A genuine
+    Music Assembler image loads either at ``base`` (the self-start stub /
+    PSID vectors precede the play routine) or at ``base + 0x21`` (a rip
+    that begins at the play routine itself); any other offset means the
+    player is not at the standard base+$21 entry, so the base is rejected.
+    """
+    end = load + image_len
+    for match in find_code_all(image, _PAT_PLAY, start=load, end=end):
+        base = match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
+        if load - base in (0, constants.NATIVE_PLAY_OFFSET):
+            return base
+    return None
 
 
 def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
@@ -248,8 +272,8 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
 def parse(data: bytes) -> Song:
     """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song."""
     load, init, play, name, author, released, image, header = _parse_container(data)
-    img = _load_view(image, load)
-    bases = _discover_bases(img, load, len(image))
+    img = load_view(image, load)
+    bases = discover_bases(img, load, len(image))
 
     orderlists = [
         _parse_orderlist(img, bases, voice) for voice in range(constants.VOICES)

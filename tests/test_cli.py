@@ -32,6 +32,16 @@ def test_resave_prg(tune_path, tmp_path):
     assert out.exists()
 
 
+def test_resave_native(tune_path, tmp_path):
+    from pymusicassembler import reader
+
+    out = tmp_path / "song.prg"
+    assert cli.main(["resave", str(tune_path), str(out), "--container", "native"]) == 0
+    blob = out.read_bytes()
+    assert blob[2] == 0x78  # self-start stub follows the load-address prefix
+    assert reader.read(out).patterns == reader.read(tune_path).patterns
+
+
 def test_error_exit_code(tmp_path):
     missing = tmp_path / "nope.sid"
     assert cli.main(["info", str(missing)]) == 1

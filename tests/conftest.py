@@ -62,6 +62,19 @@ def _frozen_grid(tune_id):
 
 
 @pytest.fixture
+def native_tune_path():
+    """A tune whose image is a native self-start song (see fetch_tunes).
+
+    Fetched on demand into the gitignored cache; skipped when unavailable
+    offline, mirroring the shared ``tune_path`` fixture.
+    """
+    try:
+        return fetch_tunes.fetch(fetch_tunes.NATIVE_TUNE)
+    except Exception as exc:  # pylint: disable=broad-except
+        pytest.skip(f"native tune unavailable: {exc}")
+
+
+@pytest.fixture
 def oracle_grid(tune_id, tune_path):
     """Ground-truth grid: live sidtrace if available, else the frozen grid."""
     grid = _live_grid(tune_path)
