@@ -1,14 +1,11 @@
 """Exceptions raised by pymusicassembler."""
 
-from pysidtracker import SidError
+from pysidtracker import make_package_errors
 
-
-class MusicAssemblerError(SidError):
-    """Base class for all pymusicassembler errors."""
-
-
-class SidParseError(MusicAssemblerError):
-    """A PSID/PRG image (or byte string) could not be parsed."""
+# ``SidParseError`` subclasses BOTH the package root and the base
+# ``pysidtracker.SidParseError`` (via ``make_package_errors``), so a base
+# ``except SidParseError`` catches a Music Assembler parse error too.
+MusicAssemblerError, SidParseError, _FormatError = make_package_errors("MusicAssembler")
 
 
 class SongValidationError(MusicAssemblerError):

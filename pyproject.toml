@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymusicassembler"
-version = "0.1.0"
+version = "0.2.0"
 description = "Pure-Python reader, writer, and player for Music Assembler SID songs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,16 +19,16 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio",
 ]
-dependencies = ["pysidtracker>=0.4"]
+dependencies = ["pysidtracker>=0.5.0"]
 
 [project.optional-dependencies]
 # Audio rendering drives an emulated SID via pysidtracker.audio (pyresidfp);
 # everything else (read/write/play/register logs) is pure stdlib.
-audio = ["pysidtracker[audio]>=0.4"]
+audio = ["pysidtracker[audio]>=0.5.0"]
 dev = [
     "black>=24",
     "pylint>=3",
-    "pysidtracker[audio]>=0.4",
+    "pysidtracker[audio]>=0.5.0",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",

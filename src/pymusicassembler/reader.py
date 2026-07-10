@@ -13,7 +13,6 @@ An unsupported player variant (no signature match, or a base outside the
 loaded image) raises :class:`SidParseError` rather than yielding garbage.
 """
 
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from pysidtracker import (
@@ -24,6 +23,7 @@ from pysidtracker import (
     SidImage,
     find_code_all,
     find_code_first,
+    read_bytes,
 )
 
 from pymusicassembler import constants
@@ -317,13 +317,7 @@ def parse(data: bytes) -> Song:
 
 def read(src) -> Song:
     """Read a Music Assembler tune from a path, bytes, or file-like object."""
-    if isinstance(src, bytes):
-        return parse(src)
-    if isinstance(src, (str, Path)):
-        return parse(Path(src).read_bytes())
-    if hasattr(src, "read"):
-        return parse(src.read())
-    raise TypeError(f"cannot read a song from {type(src).__name__}")
+    return parse(read_bytes(src))
 
 
 class MusicAssemblerSidParser(BaseSidParser):

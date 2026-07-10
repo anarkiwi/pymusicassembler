@@ -20,31 +20,27 @@ place of the PSID header -- the ``S.`` files the Triad editor loads.
 
 import struct
 from pathlib import Path
-from typing import List, Tuple
+from typing import Tuple
+
+from pysidtracker import SidError, SidImage, write_psid
 
 from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError, SongValidationError
 from pymusicassembler.model import Song
 
-_PSID_HEADER = struct.Struct(">4sHHHHHHHI")
 
-
-def _put(image: List[int], addr: int, load: int, values) -> None:
-    """Write ``values`` into the image at absolute address ``addr``.
+def _put(image: SidImage, addr: int, values) -> None:
+    """Write ``values`` into ``image`` at absolute address ``addr``.
 
     Writes past the current end grow the image (a table read past the
     source's end -- e.g. an instrument whose record the source truncated --
     is zero-filled by the reader and re-emitted in full); a write before
-    the base is a corrupt pointer and raises.
+    the base is a corrupt pointer and raises :class:`SongValidationError`.
     """
-    start = addr - load
-    for i, value in enumerate(values):
-        idx = start + i
-        if idx < 0:
-            raise SongValidationError(f"write at ${addr + i:04X} is before the image")
-        if idx >= len(image):
-            image.extend([0] * (idx - len(image) + 1))
-        image[idx] = value & 0xFF
+    try:
+        image.poke_bytes(addr, bytes(v & 0xFF for v in values))
+    except SidError as exc:
+        raise SongValidationError(str(exc)) from exc
 
 
 def validate(song: Song) -> None:
@@ -63,49 +59,43 @@ def validate(song: Song) -> None:
 def build(song: Song) -> bytes:
     """Serialize ``song`` to a raw Music Assembler C64 image."""
     validate(song)
-    image = list(song.image)
     load = song.load_addr
-    view = reader.load_view(song.image, load)
+    image = reader.load_view(song.image, load)
     try:
-        bases = reader.discover_bases(view, load, len(song.image))
+        bases = reader.discover_bases(image, load, len(song.image))
     except SidParseError as exc:
         raise SongValidationError(str(exc)) from exc
 
     # Orderlists: write each voice's entries followed by the $FF terminator,
     # in place at the address its pointer-table entry references.
     for voice, orderlist in enumerate(song.orderlists):
-        addr = image[bases["order_lo"] + voice - load] | (
-            image[bases["order_hi"] + voice - load] << 8
-        )
-        flat: List[int] = []
+        addr = image.ptr(bases["order_lo"], bases["order_hi"], voice)
+        flat = []
         for entry in orderlist.entries:
             flat.extend((entry.pattern_id & 0xFF, entry.control_byte()))
         flat.append(constants.ORDER_END)
-        _put(image, addr, load, flat)
+        _put(image, addr, flat)
 
     # Patterns: write each pattern's raw bytes + terminator at its address.
     for pattern_id, pattern in enumerate(song.patterns):
-        addr = image[bases["pattern_lo"] + pattern_id - load] | (
-            image[bases["pattern_hi"] + pattern_id - load] << 8
-        )
-        _put(image, addr, load, pattern.to_bytes())
+        addr = image.ptr(bases["pattern_lo"], bases["pattern_hi"], pattern_id)
+        _put(image, addr, pattern.to_bytes())
 
     # Instruments: 8-byte records in the instrument table.
     for iid, instrument in enumerate(song.instruments):
         _put(
             image,
             bases["instr"] + iid * constants.INSTR_RECORD_SIZE,
-            load,
             instrument.to_bytes(),
         )
 
     # Note-frequency tables.
     if song.freq_lo:
-        _put(image, bases["freq_lo"], load, song.freq_lo)
+        _put(image, bases["freq_lo"], song.freq_lo)
     if song.freq_hi:
-        _put(image, bases["freq_hi"], load, song.freq_hi)
+        _put(image, bases["freq_hi"], song.freq_hi)
 
-    return bytes(image)
+    return image.to_prg()[2:]
 
 
 # The 33-byte Music Assembler self-start / IRQ-install stub, as base $0000
@@ -188,28 +178,14 @@ def write(song: Song, dst, container: str = "auto") -> Path:
     return Path(dst)
 
 
-def _pad(text: str) -> bytes:
-    return text.encode("latin-1")[:31].ljust(32, b"\0")
-
-
 def _wrap_psid(song: Song, image: bytes) -> bytes:
     """Wrap a raw image in a minimal PSID v2 container."""
-    data_off = 0x7C
-    header = _PSID_HEADER.pack(
-        b"PSID",
-        2,  # version
-        data_off,
-        song.load_addr,
-        song.init_addr,
-        song.play_addr,
-        1,  # songs
-        1,  # start song
-        0,  # speed
+    return write_psid(
+        load=song.load_addr,
+        init=song.init_addr,
+        play=song.play_addr,
+        image=image,
+        name=song.name,
+        author=song.author,
+        released=song.released,
     )
-    # PSID v2 adds name/author/released + the v2 trailer (flags, startPage,
-    # pageLength, secondSIDAddress, thirdSIDAddress = 6 bytes), filling the
-    # header to data_off ($7C) exactly.
-    body = header + _pad(song.name) + _pad(song.author) + _pad(song.released)
-    body += struct.pack(">HBBBB", 0, 0, 0, 0, 0)
-    body = body.ljust(data_off, b"\0")
-    return body + image

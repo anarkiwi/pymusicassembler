@@ -3,9 +3,14 @@
 import argparse
 import sys
 
-from pymusicassembler import audio, reglog, writer
+from pysidtracker.audio import seconds_to_frames
+from pysidtracker.cli import add_reglog_command, add_wav_command, run_cli
+
+from pymusicassembler import audio, constants, reglog, writer
 from pymusicassembler.errors import MusicAssemblerError
 from pymusicassembler.reader import read
+
+_SONG_HELP = "Music Assembler .sid/.prg file"
 
 
 def _info(args) -> None:
@@ -24,7 +29,9 @@ def _info(args) -> None:
 
 def _reglog(args) -> None:
     song = read(args.song)
-    frames = round(args.seconds * 50)
+    frames = seconds_to_frames(
+        args.seconds, constants.PAL_CYCLES_PER_FRAME, constants.PAL_CLOCK_HZ
+    )
     writes = reglog.iter_register_writes(song, max_frames=frames)
     reglog.write_reglog(writes, args.output)
     print(f"wrote {args.output}")
@@ -49,26 +56,16 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     info = commands.add_parser("info", help="print song metadata")
-    info.add_argument("song", help="Music Assembler .sid/.prg file")
+    info.add_argument("song", help=_SONG_HELP)
     info.set_defaults(func=_info)
 
-    log = commands.add_parser("reglog", help="write a SID register log")
-    log.add_argument("song", help="Music Assembler .sid/.prg file")
-    log.add_argument("output", help="register log file to write")
-    log.add_argument("--seconds", type=float, default=60.0)
-    log.set_defaults(func=_reglog)
-
-    wav = commands.add_parser("wav", help="render through an emulated SID")
-    wav.add_argument("song", help="Music Assembler .sid/.prg file")
-    wav.add_argument("output", help="WAV file to write")
-    wav.add_argument("--seconds", type=float, default=60.0)
-    wav.add_argument("--model", choices=audio.CHIP_MODELS, default="8580")
-    wav.set_defaults(func=_wav)
+    add_reglog_command(commands, _reglog, song_help=_SONG_HELP)
+    add_wav_command(commands, _wav, song_help=_SONG_HELP)
 
     resave = commands.add_parser(
         "resave", help="re-emit the tune image (--container native = editor S. song)"
     )
-    resave.add_argument("song", help="Music Assembler .sid/.prg file")
+    resave.add_argument("song", help=_SONG_HELP)
     resave.add_argument("output", help="output file")
     resave.add_argument(
         "--container", choices=("auto", "psid", "prg", "native"), default="auto"
@@ -79,13 +76,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     """CLI entry point; returns a process exit code."""
-    args = _parser().parse_args(argv)
-    try:
-        args.func(args)
-    except (MusicAssemblerError, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    return 0
+    return run_cli(_parser, MusicAssemblerError, argv)
 
 
 if __name__ == "__main__":
