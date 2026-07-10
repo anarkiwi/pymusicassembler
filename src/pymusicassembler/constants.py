@@ -7,8 +7,15 @@ across Music Assembler tunes; only its DATA (orderlists, patterns,
 instruments and the addresses they live at) differs per tune.
 """
 
+# Shared C64 hardware register facts (PAL/NTSC timing, SID map) live in
+# pysidtracker.registers; re-export them here so the rest of the package keeps
+# using ``constants.*`` names.
+from pysidtracker import registers as _reg
+
 # SID register map (offsets within the chip's 25 registers).
-SID_REGISTERS = 25
+SID_BASE = _reg.SID_BASE
+SID_REG_COUNT = _reg.SID_REG_COUNT
+SID_REGISTERS = _reg.SID_REG_COUNT
 VOICES = 3
 VOICE_REG_SIZE = 7
 FREQ_LO_REG = 0x00
@@ -23,10 +30,11 @@ RES_FILT_REG = 0x17
 MODE_VOL_REG = 0x18
 
 # Per-voice SID base offsets ($D400 + offset).
-SID_OFFSET = (0, 7, 14)
+SID_VOICE_OFFSET = _reg.SID_VOICE_OFFSET
+SID_OFFSET = _reg.SID_VOICE_OFFSET
 
 # Pulse-width high registers carry only their low nibble (12-bit pulse).
-PW_HI_REGS = (PW_HI_REG, PW_HI_REG + 7, PW_HI_REG + 14)
+PW_HI_REGS = _reg.PW_HI_REGS
 
 # Pattern byte grammar boundaries.
 NOTE_MAX = 0x5F  # < 0x60: a note (+ trailing control byte)
@@ -84,10 +92,10 @@ OP_ARP = 0x2C2  # 4-entry arp direction table
 FREQ_TABLE_LEN = 96  # note frequency table entries
 
 # C64 timing. A PAL frame is 312 rasterlines x 63 cycles.
-PAL_CLOCK_HZ = 985248
-PAL_CYCLES_PER_FRAME = 19656
-NTSC_CLOCK_HZ = 1022727
-NTSC_CYCLES_PER_FRAME = 17095
+PAL_CLOCK_HZ = _reg.PAL_CLOCK_HZ
+PAL_CYCLES_PER_FRAME = _reg.PAL_CYCLES_PER_FRAME
+NTSC_CLOCK_HZ = _reg.NTSC_CLOCK_HZ
+NTSC_CYCLES_PER_FRAME = _reg.NTSC_CYCLES_PER_FRAME
 
 # Standard Music Assembler entry points (PSID header normally matches).
 DEFAULT_LOAD = 0x1021

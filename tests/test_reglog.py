@@ -3,9 +3,9 @@
 import io
 
 import pytest
+from pysidtracker import SidParseError
 
 from pymusicassembler import constants, reader
-from pymusicassembler.errors import MusicAssemblerError
 from pymusicassembler.reglog import (
     RegWrite,
     iter_register_writes,
@@ -38,7 +38,7 @@ def test_clock_options(tune_path):
 
 
 def test_bad_spacing(tune_path):
-    with pytest.raises(MusicAssemblerError, match="write_spacing"):
+    with pytest.raises(SidParseError, match="write_spacing"):
         list(
             iter_register_writes(
                 reader.read(tune_path), max_frames=1, cycles_per_frame=100
@@ -51,7 +51,7 @@ def test_write_read_path_round_trip(tune_path, tmp_path):
     path = tmp_path / "song.reglog"
     write_reglog(writes, path)
     text = path.read_text(encoding="utf-8")
-    assert text.startswith("# pymusicassembler register log")
+    assert text.startswith("# pysidtracker register log")
     assert read_reglog(path) == writes
     assert read_reglog(str(path)) == writes
     assert read_reglog(io.StringIO(text)) == writes
@@ -74,5 +74,5 @@ def test_read_blank_lines_and_comments():
 
 @pytest.mark.parametrize("bad", ["0 24", "0 24 15 16", "a b c"])
 def test_read_bad_lines(bad):
-    with pytest.raises(MusicAssemblerError, match="line 1"):
+    with pytest.raises(SidParseError, match="line 1"):
         read_reglog(io.StringIO(bad))

@@ -20,16 +20,16 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio",
 ]
-dependencies = ["pysidtracker>=0.2"]
+dependencies = ["pysidtracker>=0.3"]
 
 [project.optional-dependencies]
-# Audio rendering drives an emulated SID via pyresidfp; everything else
-# (read/write/play/register logs) is pure stdlib.
-audio = ["pyresidfp>=0.17"]
+# Audio rendering drives an emulated SID via pysidtracker.audio (pyresidfp);
+# everything else (read/write/play/register logs) is pure stdlib.
+audio = ["pysidtracker[audio]>=0.3"]
 dev = [
     "black>=24",
     "pylint>=3",
-    "pyresidfp>=0.17",
+    "pysidtracker[audio]>=0.3",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",
