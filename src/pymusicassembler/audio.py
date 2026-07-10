@@ -9,7 +9,13 @@ pulls ``pysidtracker[audio]``). Any object with ``write_register(reg, value)``,
 passed as ``device`` instead.
 """
 
-from pysidtracker.audio import default_device, device_sampling_frequency, write_wav
+from pysidtracker.audio import (
+    CHIP_MODELS,
+    device_sampling_frequency,
+    resolve_device,
+    seconds_to_frames,
+    write_wav,
+)
 from pysidtracker.audio import render_samples as _render_samples
 from pysidtracker.audio import render_wav as _render_wav
 from pysidtracker.errors import AudioUnavailable
@@ -21,30 +27,23 @@ from pymusicassembler.player import iter_frames
 
 __all__ = ["CHIP_MODELS", "render_samples", "render_wav", "write_wav"]
 
-CHIP_MODELS = ("6581", "8580")
 
+def _resolve(device, model: str, sampling_frequency):
+    """Validate ``model`` and return ``device`` (creating the default if None).
 
-def _default_device(model: str, sampling_frequency):
+    Wraps the shared :func:`pysidtracker.audio.resolve_device`, re-raising its
+    model :class:`ValueError` and missing-pyresidfp
+    :class:`~pysidtracker.errors.AudioUnavailable` as :class:`MusicAssemblerError`.
+    """
     try:
-        return default_device(model, sampling_frequency)
+        return resolve_device(device, model, sampling_frequency)
+    except ValueError as exc:
+        raise MusicAssemblerError(str(exc)) from exc
     except AudioUnavailable as exc:
         raise MusicAssemblerError(
             "pyresidfp is required to render audio; "
             "install with: pip install pymusicassembler[audio]"
         ) from exc
-
-
-def _resolve(device, model: str, sampling_frequency):
-    """Validate ``model`` and return ``device`` (creating the default if None)."""
-    if model not in CHIP_MODELS:
-        raise MusicAssemblerError(f"chip model must be one of {CHIP_MODELS}")
-    if device is None:
-        return _default_device(model, sampling_frequency)
-    return device
-
-
-def _max_frames(seconds: float, cycles_per_frame: int, clock_frequency: float) -> int:
-    return max(1, round(seconds / (cycles_per_frame / clock_frequency)))
 
 
 def render_samples(
@@ -65,7 +64,8 @@ def render_samples(
     device = _resolve(device, model, sampling_frequency)
     samples = _render_samples(
         iter_frames(
-            song, max_frames=_max_frames(seconds, cycles_per_frame, clock_frequency)
+            song,
+            max_frames=seconds_to_frames(seconds, cycles_per_frame, clock_frequency),
         ),
         model=model,
         sampling_frequency=sampling_frequency,
@@ -90,7 +90,8 @@ def render_wav(
     device = _resolve(device, model, sampling_frequency)
     return _render_wav(
         iter_frames(
-            song, max_frames=_max_frames(seconds, cycles_per_frame, clock_frequency)
+            song,
+            max_frames=seconds_to_frames(seconds, cycles_per_frame, clock_frequency),
         ),
         dst,
         model=model,

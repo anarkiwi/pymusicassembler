@@ -19,15 +19,22 @@ frame), mirroring :class:`pymusicassembler.model.Song`'s output.
 from dataclasses import dataclass
 from typing import List, Optional
 
+from pysidtracker.registers import (
+    AD,
+    CTRL,
+    FC_HI,
+    FREQ_HI,
+    FREQ_LO,
+    MODE_VOL,
+    PW_HI,
+    PW_LO,
+    RES_FILT,
+    SR,
+)
+
 from pymusicassembler import constants, reader
 from pymusicassembler.model import Song
 
-FREQ_LO, FREQ_HI, PW_LO, PW_HI, CTRL, AD, SR = 0, 1, 2, 3, 4, 5, 6
-FC_HI, RES_FILT, MODE_VOL = (
-    constants.FC_HI_REG,
-    constants.RES_FILT_REG,
-    constants.MODE_VOL_REG,
-)
 SID_OFFSET = constants.SID_OFFSET
 
 
