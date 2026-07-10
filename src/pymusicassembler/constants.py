@@ -102,6 +102,18 @@ DEFAULT_LOAD = 0x1021
 DEFAULT_INIT = 0x1048
 DEFAULT_PLAY = 0x1021
 
+# Native Music Assembler editor song ("S." file, Triad v1.4) layout.  The
+# native song is the player+data image with a self-starting IRQ-install
+# stub at its base in place of a PSID header.  Relative to the player base
+# the play routine is at +$21, init at +$48, the IRQ handler at +$18, and
+# the tempo-prescaler cell (which anchors the base) at +$90.
+NATIVE_PLAY_OFFSET = 0x21
+NATIVE_INIT_OFFSET = 0x48
+NATIVE_IRQ_OFFSET = 0x18
+NATIVE_TEMPO_OFFSET = 0x90
+NATIVE_STUB_LEN = 0x21  # bytes the self-start stub occupies (base..base+$20)
+NATIVE_IRQ_EXIT = 0xEA31  # KERNAL IRQ return the stub's handler jumps to
+
 # Per-voice work-RAM absolute addresses (voice index added).  The init
 # routine ($1048) zeroes only $1081..$1090 (pat_cursor / ctrl /
 # order_cursor / dur / pattern_id) and then reloads pattern_id / transrep

@@ -17,10 +17,37 @@ from the player code's 16-bit operands (relocation-safe — no fixed-address
 assumption). Packed/relocating builds are detected by running the tune's init;
 container headers are not trusted.
 
-`write(song, dst, container="auto"|"psid"|"prg")` writes a tune image; `auto`
-re-emits the original container byte-identically. `build(read(image)) == image`
-and the full `.sid` container re-emits byte-identically for every tune;
-`read(write(song)) == song`.
+`write(song, dst, container="auto"|"psid"|"prg"|"native")` writes a tune image;
+`auto` re-emits the original container byte-identically. `build(read(image)) ==
+image` and the full `.sid` container re-emits byte-identically for every tune;
+`read(write(song)) == song`. The writer discovers the table bases from the same
+relocation-invariant player-code signatures the reader uses, so any load address
+re-emits, not just the standard `$1021` layout.
+
+## Native editor song format (`container="native"`)
+
+The Music Assembler editor (Triad, v1.4, 1994 — [CSDb
+release 27472](https://csdb.dk/release/?id=27472)) saves songs as `S.`-prefixed
+`.prg` files. A native song is exactly the player+data image this library models
+with a **self-starting IRQ-install stub** in place of a PSID header:
+
+```
+base+$00  78 20 48 .. A9 18 ...   SEI; JSR init; install IRQ vector -> base+$18;
+                                   start CIA/raster IRQ; CLI; RTS   (SYS base plays)
+base+$18  EE 19 D0 20 21 .. 4C 31 EA   IRQ: ack raster; JSR play; JMP $EA31
+base+$21  <play routine>          (the exact player the reader decodes)
+base+$48  <init routine>
+...       <order / pattern / instrument / note-freq / wave-program tables>
+```
+
+HVSC rips of these songs just swap the first six bytes for PSID `JMP init` /
+`JMP play` vectors (or begin the image at the play routine). `container="native"`
+reverses that: it re-emits the data, finds the player base from the play-entry
+signature (`base = tempo_cell - $90`, where the tempo prescaler is `base+$90`),
+and writes the self-start stub back at `base` — at the tune's **own** load
+address (no relocation). A song whose image already carries the stub re-emits
+byte-for-byte; a source that truncated a referenced instrument record is
+re-emitted in full (a few trailing zero bytes longer).
 
 ## Data model
 
@@ -82,6 +109,8 @@ cycles/frame, forward-filled, one leading silent play-call aligned over):
 
 - [Music Assembler](https://www.codebase64.org/) (Richard Bayliss / Eric
   Campbell era player); recovered from its disassembly (`decompile.c`).
+- [Music-Assembler V1.4](https://csdb.dk/release/?id=27472) (Triad, 1994) — the
+  editor whose native `S.` song format `container="native"` emits.
 - `preframr-sidtrace` register oracle.
 - [pyresidfp](https://pypi.org/project/pyresidfp/) — reSIDfp SID emulation
   (WAV render).

@@ -24,7 +24,7 @@ from pymusicassembler.reglog import (
     read_reglog,
     write_reglog,
 )
-from pymusicassembler.writer import build, validate, write
+from pymusicassembler.writer import build, build_native, validate, write
 
 __version__ = "0.1.0"
 
@@ -45,6 +45,7 @@ __all__ = [
     "SongValidationError",
     "__version__",
     "build",
+    "build_native",
     "iter_frames",
     "iter_register_writes",
     "parse",

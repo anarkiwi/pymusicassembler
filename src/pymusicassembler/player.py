@@ -19,7 +19,7 @@ frame), mirroring :class:`pymusicassembler.model.Song`'s output.
 from dataclasses import dataclass
 from typing import List, Optional
 
-from pymusicassembler import constants
+from pymusicassembler import constants, reader
 from pymusicassembler.model import Song
 
 FREQ_LO, FREQ_HI, PW_LO, PW_HI, CTRL, AD, SR = 0, 1, 2, 3, 4, 5, 6
@@ -465,13 +465,22 @@ def _resolve_tables(song: Song) -> _Tables:
     """Resolve the per-tune table base addresses from the song's image.
 
     The Music Assembler player binary is identical across tunes, so each
-    pointer-table base lives at a fixed player-code offset as a 16-bit
-    operand; reading those operands recovers the bases for any (relocated)
-    tune of the same player.
+    pointer-table base lives at a fixed offset *within the player code* as a
+    16-bit operand.  The ``OP_*`` offsets are measured from the play routine
+    (base+$21); an image whose bytes begin before it -- e.g. a native song
+    with the self-start stub at its base, or any rip that keeps the header --
+    shifts every operand by that much, so anchor on the discovered player
+    base rather than assuming the play routine is at image offset 0.
     """
     image = song.image
+    view = reader.load_view(image, song.load_addr)
+    base = reader.find_player_base(view, song.load_addr, len(image))
+    code_off = (
+        base + constants.NATIVE_PLAY_OFFSET - song.load_addr if base is not None else 0
+    )
 
     def op16(off: int) -> int:
+        off += code_off
         if off + 1 < len(image):
             return image[off] | (image[off + 1] << 8)
         return 0

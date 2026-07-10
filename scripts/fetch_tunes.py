@@ -49,6 +49,12 @@ TUNES = {
     "3lux": "DEMOS/0-9/3LUX_Intro.sid",
 }
 
+# A tune whose image already carries the native self-start stub verbatim
+# (``78 20 48 50 ...`` at load $5000): a native editor song wrapped in a
+# PSID, used to assert byte-exact native re-emission.  Kept out of TUNES so
+# the shared standard-layout tests still parametrize only over $1021 tunes.
+NATIVE_TUNE = "DEMOS/A-F/Barbara.sid"
+
 
 def fetch(relpath: str, *, force: bool = False) -> Path:
     """Fetch ``relpath`` from the HVSC mirror into the cache; return its path."""

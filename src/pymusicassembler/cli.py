@@ -65,10 +65,14 @@ def _parser() -> argparse.ArgumentParser:
     wav.add_argument("--model", choices=audio.CHIP_MODELS, default="8580")
     wav.set_defaults(func=_wav)
 
-    resave = commands.add_parser("resave", help="re-emit the tune image")
+    resave = commands.add_parser(
+        "resave", help="re-emit the tune image (--container native = editor S. song)"
+    )
     resave.add_argument("song", help="Music Assembler .sid/.prg file")
     resave.add_argument("output", help="output file")
-    resave.add_argument("--container", choices=("auto", "psid", "prg"), default="auto")
+    resave.add_argument(
+        "--container", choices=("auto", "psid", "prg", "native"), default="auto"
+    )
     resave.set_defaults(func=_resave)
     return parser
 
