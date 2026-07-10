@@ -9,9 +9,10 @@ pulls ``pysidtracker[audio]``). Any object with ``write_register(reg, value)``,
 passed as ``device`` instead.
 """
 
+from pysidtracker.audio import default_device, device_sampling_frequency, write_wav
 from pysidtracker.audio import render_samples as _render_samples
 from pysidtracker.audio import render_wav as _render_wav
-from pysidtracker.audio import write_wav
+from pysidtracker.errors import AudioUnavailable
 
 from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerError
@@ -25,19 +26,12 @@ CHIP_MODELS = ("6581", "8580")
 
 def _default_device(model: str, sampling_frequency):
     try:
-        from pyresidfp import SoundInterfaceDevice
-        from pyresidfp.sound_interface_device import ChipModel
-    except ImportError as exc:
+        return default_device(model, sampling_frequency)
+    except AudioUnavailable as exc:
         raise MusicAssemblerError(
             "pyresidfp is required to render audio; "
             "install with: pip install pymusicassembler[audio]"
         ) from exc
-    chip = {"6581": ChipModel.MOS6581, "8580": ChipModel.MOS8580}[model]
-    if sampling_frequency:
-        return SoundInterfaceDevice(
-            model=chip, sampling_frequency=float(sampling_frequency)
-        )
-    return SoundInterfaceDevice(model=chip)
 
 
 def _resolve(device, model: str, sampling_frequency):
@@ -79,7 +73,7 @@ def render_samples(
         clock_frequency=clock_frequency,
         device=device,
     )
-    return samples, float(device.sampling_frequency)
+    return samples, device_sampling_frequency(device)
 
 
 def render_wav(
