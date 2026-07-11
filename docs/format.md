@@ -73,7 +73,7 @@ and the decoded pattern events `NoteEvent` / `InstrumentEvent` / `DurationEvent`
 ### Notes vs the decompiled reference (decompile.c)
 
 The player was recovered from its disassembly and validated byte-exact against
-the `preframr-sidtrace` oracle. Two facts a naive read of the Ghidra decompile
+the `sidtrace` oracle. Two facts a naive read of the Ghidra decompile
 (`decompile.c`) gets wrong, recovered from the raw disassembly:
 
 - **The bare-duration token (`$60–$7F`) DOES advance the pattern cursor** (the
@@ -96,14 +96,22 @@ follows the shared `py*` register-log surface.
 
 ### Byte-exact verdict
 
-Validated against the `preframr-sidtrace` register oracle (PAL, 19656
-cycles/frame, forward-filled, one leading silent play-call aligned over):
+Validated frame-for-frame against the
+[`sidtrace`](https://github.com/anarkiwi/sidtrace) oracle — a patched
+`sidplayfp` run in Docker — via the shared `pysidtracker.make_oracle_fixtures`
+(PAL, forward-filled 25-register grid, one leading silent play-call aligned
+over). `tests/test_oracle_hvsc.py` covers one representative HVSC tune per
+supported player variation, each **byte-exact (residual 0)**:
 
-| Tune | Author | Frames | Residual |
-| --- | --- | --- | --- |
-| Space Invadarz on Vacation | Richard Bayliss | 828 | **0** (byte-exact) |
-| 7 Years | Eric Campbell | 828 | **0** (byte-exact) |
-| 3LUX Intro | — | 827 | **0** (byte-exact) |
+| Variation | Tune | Load / base |
+| --- | --- | --- |
+| Standard `$1021` PSID (`load = base+$21`) | Space Invadarz on Vacation, 7 Years, 3LUX Intro | `$1021` / `$1000` |
+| Image loads at the player base (`load == base`) | Acid Mix | `$1000` / `$1000` |
+| Relocated player (`base != $1000`) | Corvus, Dr Doom, Kasza-Nota | `$2e00` / `$1200` / `$1500` |
+| Native self-start song wrapped in PSID (`$78` stub) | Eastern Promise | `$1b00` / `$1b00` |
+
+All are single-speed. See [oracle-testing.md](oracle-testing.md) for how the
+oracle comparison works.
 
 ## References
 
@@ -111,7 +119,8 @@ cycles/frame, forward-filled, one leading silent play-call aligned over):
   Campbell era player); recovered from its disassembly (`decompile.c`).
 - [Music-Assembler V1.4](https://csdb.dk/release/?id=27472) (Triad, 1994) — the
   editor whose native `S.` song format `container="native"` emits.
-- `preframr-sidtrace` register oracle.
+- [`sidtrace`](https://github.com/anarkiwi/sidtrace) — the `sidplayfp` register
+  oracle the player is validated against.
 - [pyresidfp](https://pypi.org/project/pyresidfp/) — reSIDfp SID emulation
   (WAV render).
 - [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) — shared

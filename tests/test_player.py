@@ -1,11 +1,9 @@
-"""Byte-exact player validation against the SID register oracle.
+"""Player unit tests (structure, framing, determinism).
 
-The Music Assembler player renders from its first play call, which may be
-one leading SILENT call (a duration counter underflows, the row is parsed,
-no audible SID write is emitted) before the first audible call.  The oracle
-write-stream cannot see that silent call, so its frame 0 is the first
-audible call; the validator aligns by dropping up to a few leading silent
-interpreter frames, exactly like deplayroutine's validator.
+Byte-exact validation against the SID register oracle lives in
+:mod:`tests.test_oracle_hvsc` (marker ``oracle``).  These tests exercise the
+:class:`~pymusicassembler.player.Player` machinery inherited from
+:class:`pysidtracker.MemPlayer` without needing Docker.
 """
 
 import pytest
@@ -14,46 +12,13 @@ from pymusicassembler import reader
 from pymusicassembler.player import Player, iter_frames, render_grid
 
 NREG = 25
-MAX_LEAD = 4
 
 
-def _aligned_residual(oracle, rendered):
-    """Return (ok, lead, divergence) aligning over leading silent frames."""
-    if not rendered:
-        return False, 0, (0, 0, -1, -1)
-    baseline = rendered[0]
-    best = None
-    for lead in range(MAX_LEAD + 1):
-        if lead and (lead > len(rendered) or rendered[lead - 1] != baseline):
-            break
-        div = None
-        for frame in range(len(oracle)):
-            row = rendered[lead + frame]
-            for reg in range(NREG):
-                if oracle[frame][reg] != row[reg]:
-                    div = (frame, reg, oracle[frame][reg], row[reg])
-                    break
-            if div:
-                break
-        if div is None:
-            return True, lead, None
-        if best is None:
-            best = div
-    return False, 0, best
+def test_player_is_memplayer_subclass():
+    """The one tracker class derives from the shared MemPlayer base."""
+    import pysidtracker
 
-
-def test_byte_exact(tune_id, tune_path, oracle_grid):
-    """The player reproduces the oracle's per-frame registers byte-exact."""
-    oracle, source = oracle_grid
-    song = reader.read(tune_path)
-    rendered = render_grid(song, len(oracle) + MAX_LEAD)
-    ok, lead, div = _aligned_residual(oracle, rendered)
-    assert ok, (
-        f"{tune_id}: not byte-exact (oracle {source}); "
-        f"first divergence frame {div[0]} reg ${div[1]:02X} "
-        f"expected ${div[2]:02X} got ${div[3]:02X}"
-    )
-    assert lead <= MAX_LEAD
+    assert issubclass(Player, pysidtracker.MemPlayer)
 
 
 def test_first_frame_all_registers(tune_path):
@@ -85,6 +50,14 @@ def test_render_grid_shape(tune_path):
     rows = render_grid(song, 12)
     assert len(rows) == 12
     assert all(len(row) == NREG for row in rows)
+
+
+def test_render_grid_is_forward_filled(tune_path):
+    """Each render_grid row is the full forward-filled register file."""
+    song = reader.read(tune_path)
+    rows = render_grid(song, 20)
+    # Volume/filter are set at init and never cleared, so they persist.
+    assert all(row[0x18] for row in rows)  # MODE_VOL stays nonzero
 
 
 def test_unknown_tune_skips_gracefully(tune_id):

@@ -1,10 +1,10 @@
 """Constants for the Music Assembler player and song format.
 
 Values follow the decompiled Music Assembler player (Richard Bayliss /
-Eric Campbell era), cross-checked byte-exact against the
-``preframr-sidtrace`` register oracle.  The player code is identical
-across Music Assembler tunes; only its DATA (orderlists, patterns,
-instruments and the addresses they live at) differs per tune.
+Eric Campbell era), cross-checked byte-exact against the ``sidtrace``
+register oracle.  The player code is identical across Music Assembler
+tunes; only its DATA (orderlists, patterns, instruments and the addresses
+they live at) differs per tune.
 """
 
 # Shared C64 hardware register facts (PAL/NTSC timing, SID map) live in
@@ -143,3 +143,17 @@ WORK_PW_HI = 0x13DF
 WORK_VIB_FREQ_LO = 0x13E2
 WORK_CTRL_MASK = 0x1031
 WORK_FLAGS = 0x00FD  # zero-page; outside the image -> defaults to 0
+
+# Filter-cutoff sweep state / per-tune immediates in the player code region
+# ($129e/$1296/$12a0: live accumulator / gate counter / step; $1266/$126b:
+# the voice-0 trigger reset immediates the player customises per tune).
+WORK_FC_ACC = 0x129E
+WORK_FC_CTR = 0x1296
+WORK_FC_STEP = 0x12A0
+WORK_FC_ACC_RESET = 0x1266
+WORK_FC_CTR_RESET = 0x126B
+
+# Player base the absolute work-RAM addresses above are calibrated to.  A
+# relocated tune shifts every base-relative work/immediate address (but not
+# the zero-page WORK_FLAGS) by (discovered base - WORK_BASE).
+WORK_BASE = 0x1000
