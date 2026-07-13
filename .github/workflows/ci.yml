@@ -30,7 +30,7 @@ jobs:
         # fetch them from the mirror into a gitignored cache.  Cache that dir
         # across runs, keyed on the corpus list + fetch script so a changed
         # sample invalidates it.
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: tests/.tunecache
           key: hvsc-tunes-${{ hashFiles('tests/fixtures/ma_corpus.txt', 'scripts/fetch_tunes.py') }}
@@ -65,13 +65,13 @@ jobs:
           digest=$(docker inspect --format '{{index .RepoDigests 0}}' anarkiwi/sidtrace:latest)
           echo "digest=${digest##*@}" >> "$GITHUB_OUTPUT"
       - name: Cache HVSC tunes
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .oracle-cache/hvsc
           key: oracle-hvsc-${{ hashFiles('tests/test_oracle_hvsc.py') }}
           restore-keys: oracle-hvsc-
       - name: Cache oracle CSVs
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .oracle-cache/csv
           key: oracle-csv-${{ steps.image.outputs.digest }}-${{ hashFiles('tests/test_oracle_hvsc.py') }}
