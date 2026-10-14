@@ -2,7 +2,7 @@
 
 Builds differ in load address and in layout (later builds insert orderlist and
 wave-program commands), so each address is read from the operand of the
-instruction that uses it, matched by opcode skeleton nearest the play entry.
+instruction that uses it, in the routine the play entry's control flow reaches.
 """
 
 from dataclasses import dataclass, fields
@@ -18,50 +18,74 @@ _RETURNS = (0x00, 0x40, 0x60, 0x6C)  # BRK, RTI, RTS, JMP (ind)
 IRQ_VECTORS = (0x0314, 0xFFFE)
 
 PLAY_ENTRY = CodePattern("A2 00 CE {tempo:w} 30 {bmi}")
-_RELOAD = CodePattern("A9 ?? 8D {tempo:w}")
 
-_SIGNATURES = (
-    CodePattern(
-        "A9 ?? 8D 18 D4 A9 ?? 8D 17 D4 29 0F 8D {owner_init:w} A2 0F 9D {clear:w}"
-        " CA 10 FA A2 02 BD {order_lo:w} 85 FA BD {order_hi:w} 85 FB A0 00 B1 FA"
-        " 9D {pattern_id:w} C8 B1 FA 9D {transrep:w} 29 0F 9D {repeat:w}"
+# Each routine is matched where the player's own control flow reaches it: a
+# ``{to_*}`` branch offset or ``{*:w}`` call target captured by an earlier one,
+# or ``*_end`` straight after one, through any ``JMP`` trampoline. ``{at_*}``
+# records where a self-modified immediate operand lives.
+_ROUTINES = (
+    ("entry", "A2 00 CE {tempo:w} 30 {to_reload} 20 {output:w}"),
+    ("to_reload", "A9 ?? 8D ?? ?? 20 {advance:w}"),
+    ("advance", "DE {dur:w}"),
+    ("advance_end", "30 {to_parse}"),
+    (
+        "to_parse",
+        "BC {pattern_id:w} C0 FE D0 09 BD {ctrl:w} 29 FE 9D ?? ?? 60 B9 {pattern_lo:w}"
+        " 85 ?? B9 {pattern_hi:w} 85 ?? BC {pat_cursor:w} B1 ?? 30 20 C9 60"
+        " 90 {to_note} 29 1F 9D ?? ?? A9 FE 9D {ctrl_mask:w} 20 ?? ?? 4C {row_end:w}",
     ),
-    CodePattern(
-        "BC ?? ?? C0 FE D0 09 BD {ctrl:w} 29 FE 9D ?? ?? 60 B9 {pattern_lo:w} 85 FA"
-        " B9 {pattern_hi:w} 85 FB BC {pat_cursor:w} B1 FA 30 20 C9 60 90 43 29 1F"
-        " 9D {dur:w} A9 FE 9D {ctrl_mask:w}"
+    (
+        "to_note",
+        "85 ?? C8 BD {transrep:w} 4A 4A 4A 4A 18 65 ?? 9D {note_index:w} 84 ?? A8"
+        " B9 {freq_lo:w} 9D {freq_lo_w:w} 9D {vib_freq_lo:w} B9 {freq_hi:w}"
+        " 9D {freq_hi_w:w} 9D {vib_freq_hi:w} A4 ?? B1 ?? 9D {note_ctl:w} 29 1F"
+        " 9D ?? ?? B1 ?? 30 {to_filter} 29 20 F0 ?? C8 B1 ?? 9D {vib_lo_step:w}"
+        " C8 B1 ?? 9D {vib_hi_step:w}",
     ),
-    CodePattern(
-        "0A 0A 0A 9D {instr_x8:w} C8 B1 FA C9 60 B0 BD 85 FC C8 BD ?? ?? 4A 4A 4A 4A"
-        " 18 65 FC 9D {note_index:w} 84 FC A8 B9 {freq_lo:w} 9D {freq_lo_w:w}"
-        " 9D {vib_freq_lo:w} B9 {freq_hi:w} 9D {freq_hi_w:w} 9D {vib_freq_hi:w}"
-        " A4 FC B1 FA 9D {note_ctl:w} 29 1F 9D ?? ?? B1 FA 30 22 29 20 F0 45 C8 B1 FA"
-        " 9D {vib_lo_step:w} C8 B1 FA 9D {vib_hi_step:w}"
+    (
+        "to_filter",
+        "8E {filter_owner:w} C8 B1 ?? 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
+        " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 8D 17 ?? D0 09 8D {fc_ctr_reset:w}"
+        " BD {res_presets:w} 8D 17 ?? A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
+        " 9D {arp_substep:w} 9D {arp_phase:w}",
     ),
-    CodePattern(
-        "8E {filter_owner:w} C8 B1 FA 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
-        " 8D {fc_step:w} C8 B1 FA D0 07 A9 F0 8D 17 D4 D0 09 8D {fc_ctr_reset:w}"
-        " BD {res_presets:w} 8D 17 D4 A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
-        " 9D {arp_substep:w} 9D {arp_phase:w}"
+    (
+        "row_end",
+        "C8 B1 ?? C9 FF D0 ?? DE {repeat:w} 10 ?? BD {order_lo:w} 85 ??"
+        " BD {order_hi:w} 85 ?? BC {order_cursor:w} C8",
     ),
-    CodePattern(
-        "C8 B1 FA C9 FF D0 ?? DE ?? ?? 10 ?? BD ?? ?? 85 FA BD ?? ?? 85 FB"
-        " BC {order_cursor:w} C8"
+    (
+        "output",
+        "BC {instr_x8:w} 84 ?? BD ?? ?? 29 40 D0 {to_sustain} 9D {instr_cursor:w}"
+        " B9 {instr:w} 85 ?? B9 ?? ?? BC {voice_reg:w} 99 06 {sid} A5 ?? 99 05 ??"
+        " BD ?? ?? 29 FE 99 04 ?? A4 ?? B9 ?? ?? 9D ?? ?? B9 ?? ?? 9D {pw_lo:w}"
+        " 9D {pw_hi:w} E0 {at_trigger_owner} D0 0A A9 {at_trigger_acc} 8D {fc_acc:w}"
+        " A9 {at_trigger_ctr} 8D {fc_ctr:w} A9 00"
+        " 9D {pw_substep:w} 9D {pw_dir:w} B9 ?? ?? 4A 4A 4A 9D {porta_ctr:w}"
+        " BD ?? ?? 09 40 9D ?? ?? B9 ?? ?? 95 {flags}",
     ),
-    CodePattern(
-        "BC ?? ?? 84 FC BD ?? ?? 29 40 D0 ?? 9D {instr_cursor:w} B9 {instr:w} 85 FA"
-        " B9 ?? ?? BC {voice_reg:w} 99 06 D4 A5 FA 99 05 D4 BD ?? ?? 29 FE 99 04 D4"
-        " A4 FC B9 ?? ?? 9D ?? ?? B9 ?? ?? 9D {pw_lo:w} 9D {pw_hi:w} E0 ?? D0 0A"
-        " A9 ?? 8D {fc_acc:w} A9 ?? 8D {fc_ctr:w} A9 00 9D {pw_substep:w}"
-        " 9D {pw_dir:w} B9 ?? ?? 4A 4A 4A 9D {porta_ctr:w} BD ?? ?? 09 40 9D ?? ??"
-        " B9 ?? ?? 95 {flags}"
+    (
+        "to_sustain",
+        "EC {sweep_owner:w} D0 12 A9 {at_sweep_ctr} F0 0E CE {sweep_dec:w} 18"
+        " A9 {at_sweep_acc} 69 {at_sweep_step} 8D {sweep_sta:w} 8D 16 ??"
+        " B5 ?? 29 0F F0 {to_arp} 20 {program:w}",
     ),
-    CodePattern("DE ?? ?? 10 49 FE ?? ?? BD ?? ?? 29 03 A8 B9 {arp:w} D0 13"),
-    CodePattern(
-        "A8 B9 {inner_lo:w} 85 FA B9 {inner_hi:w} 85 FB BC ?? ?? B1 FA 3D ?? ??"
-        " 9D ?? ?? C8 B1 FA 30 {pitch_skip} 18 7D ?? ?? 29 7F 8D ?? ?? C8 B1 FA F0 03"
-        " 8D ?? ?? C8 B1 FA C9"
+    (
+        "to_arp",
+        "BD ?? ?? 29 20 D0 ?? B5 ?? 29 10 F0 ?? DE ?? ?? 10 ?? FE ?? ?? BD ?? ??"
+        " 29 03 A8 B9 {arp:w} D0 13",
     ),
+    (
+        "program",
+        "A8 B9 {inner_lo:w} 85 ?? B9 {inner_hi:w} 85 ?? BC ?? ?? B1 ?? 3D ?? ??"
+        " 9D ?? ?? C8 B1 ?? 30 {pitch_skip} 18 7D ?? ?? 29 7F 8D ?? ?? C8 B1 ??"
+        " F0 03 8D {program_acc:w} C8 B1 ?? C9",
+    ),
+)
+_ROUTINES = tuple((at, CodePattern(spec)) for at, spec in _ROUTINES)
+
+_INIT = CodePattern(
+    "A9 ?? 8D 18 ?? A9 ?? 8D 17 ?? 29 0F 8D ?? ?? A2 0F 9D ?? ?? CA 10 FA A2 02"
 )
 
 # Optional commands later builds decode: (feature, pattern, captured cell that
@@ -69,17 +93,17 @@ _SIGNATURES = (
 _FEATURES = (
     (
         "order_tempo",
-        CodePattern("C9 FC D0 ?? C8 B1 FA 8D {cell:w} 8D ?? ?? C8 4C"),
+        CodePattern("C9 FC D0 ?? C8 B1 ?? 8D {cell:w} 8D ?? ?? C8 4C"),
         "tempo_reload",
     ),
     (
         "order_jump",
-        CodePattern("C9 FD D0 ?? C8 B1 FA 0A 9D {cell:w} A8"),
+        CodePattern("C9 FD D0 ?? C8 B1 ?? 0A 9D {cell:w} A8"),
         "order_cursor",
     ),
     (
         "order_jump",
-        CodePattern("C9 FD F0 01 60 C8 B1 FA 0A 9D {cell:w} A8"),
+        CodePattern("C9 FD F0 01 60 C8 B1 ?? 0A 9D {cell:w} A8"),
         "order_cursor",
     ),
     (
@@ -101,8 +125,6 @@ class Layout:
     tempo: int
     tempo_reload: int
     init: int
-    owner_init: int
-    clear: int
     order_lo: int
     order_hi: int
     pattern_id: int
@@ -141,6 +163,16 @@ class Layout:
     pw_hi: int
     fc_acc: int
     fc_ctr: int
+    trigger_owner: int
+    trigger_acc: int
+    trigger_ctr: int
+    sweep_owner: int
+    sweep_ctr: int
+    sweep_dec: int
+    sweep_acc: int
+    sweep_step: int
+    sweep_sta: int
+    program_acc: int
     pw_substep: int
     pw_dir: int
     porta_ctr: int
@@ -149,6 +181,7 @@ class Layout:
     inner_lo: int
     inner_hi: int
     pitch_skip: int
+    sid: int
     order_tempo: bool = False
     order_jump: bool = False
     program_jump: bool = False
@@ -167,9 +200,8 @@ def _word(image: SidImage, addr: int) -> int:
     return image.peek(addr) | (image.peek(addr + 1) << 8)
 
 
-def _walk(image: SidImage, addr: int, entries) -> Optional[int]:
-    """The play entry the code at ``addr`` calls or jumps to before it returns."""
-    seen = set()
+def _walk(image: SidImage, addr: int, entries, seen) -> Optional[int]:
+    """The first play entry the code at ``addr`` jumps to or calls, depth first."""
     while addr not in seen:
         if addr in entries:
             return addr
@@ -179,8 +211,10 @@ def _walk(image: SidImage, addr: int, entries) -> Optional[int]:
         if op == JMP_ABS:
             addr = target
             continue
-        if op == JSR_ABS and target in entries:
-            return target
+        if op == JSR_ABS:
+            found = _walk(image, target, entries, seen)
+            if found is not None:
+                return found
         if op in _RETURNS:
             return None
         addr = (addr + OP_LEN[op]) & 0xFFFF
@@ -197,47 +231,56 @@ def resolve_entry(mem, play: int, start: int = 0, end: int = 0x10000) -> Optiona
     entries = {m.addr for m in play_entries(image, start, end)}
     starts = [play] if play else [_word(image, v) for v in IRQ_VECTORS]
     for addr in starts:
-        found = _walk(image, addr, entries)
+        found = _walk(image, addr, entries, set())
         if found is not None:
             return found
     return min(entries, key=lambda e: abs(e - starts[0]), default=None)
 
 
-def _nearest(image: SidImage, pattern: CodePattern, entry: int, start, end):
-    matches = find_code_all(image, pattern, start=start, end=end)
-    return min(matches, key=lambda m: abs(m.addr - entry), default=None)
+def _follow_jmp(image: SidImage, addr: int) -> int:
+    """``addr``, or where the chain of ``JMP abs`` trampolines at it leads."""
+    seen = set()
+    while image.peek(addr) == JMP_ABS and addr not in seen:
+        seen.add(addr)
+        addr = _word(image, addr + 1)
+    return addr
+
+
+def _s8(value: int) -> int:
+    return value - 0x100 if value & 0x80 else value
 
 
 def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     """The :class:`Layout` of the player whose play entry is at ``entry``.
 
-    Raises :class:`MusicAssemblerParseError` when a signature is missing.
+    Raises :class:`MusicAssemblerParseError` when a routine is not where the
+    player's control flow leads.
     """
     image = _as_image(mem)
-    head = find_code_all(image, PLAY_ENTRY, start=entry, end=entry + 7)
-    if not head:
-        raise MusicAssemblerParseError(f"no play entry at {entry:#06x}")
-    tempo = head[0].captures["tempo"]
-    target = entry + 7 + head[0].captures["bmi"]
-    reload = find_code_all(image, _RELOAD, start=target, end=target + 5)
-    if not reload or reload[0].captures["tempo"] != tempo:
-        raise MusicAssemblerParseError(f"no tempo reload at {target:#06x}")
-    found = {"entry": entry, "tempo": tempo, "tempo_reload": target + 1}
-    missing = []
-    for pattern in _SIGNATURES:
-        match = _nearest(image, pattern, entry, start, end)
-        if match is None:
-            missing.append(pattern.captures[0][0])
-            continue
-        found.update(match.captures)
-        if "owner_init" in match.captures:
-            found["init"] = match.addr
-    if found.get("pitch_skip", 0) not in (0, 4):
-        missing.append("pitch_skip")
-    if missing:
-        raise MusicAssemblerParseError(
-            f"player signatures not found ({','.join(missing)}); unsupported variant"
-        )
+    found = {"entry": entry}
+    for at, pattern in _ROUTINES:
+        addr = _follow_jmp(image, found[at])
+        hit = find_code_all(image, pattern, start=addr, end=addr + pattern.length)
+        if not hit:
+            raise MusicAssemblerParseError(
+                f"player signatures not found ({at} at {addr:#06x}); unsupported variant"
+            )
+        for name, offset, _ in pattern.captures:
+            value = hit[0].captures[name]
+            if name[:3] == "to_":
+                value = addr + offset + 1 + _s8(value)
+            elif name[:3] == "at_":
+                name, value = name[3:], addr + offset
+            found[name] = value
+        found[f"{at}_end"] = addr + pattern.length
+    found["tempo_reload"] = found["to_reload"] + 1
+    found["sid"] <<= 8
+    if found["pitch_skip"] not in (0, 4):
+        raise MusicAssemblerParseError("player signatures not found (pitch_skip)")
+    inits = find_code_all(image, _INIT, start=start, end=end)
+    found["init"] = min(
+        (m.addr for m in inits), key=lambda a: abs(a - entry), default=0
+    )
     for feature, pattern, cell in _FEATURES:
         if any(
             m.captures["cell"] == found[cell]

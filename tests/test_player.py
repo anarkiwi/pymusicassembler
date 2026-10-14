@@ -6,10 +6,12 @@ Byte-exact validation against the SID register oracle lives in
 :class:`pysidtracker.MemPlayer` without needing Docker.
 """
 
+from dataclasses import replace
+
 import pytest
 
 from pymusicassembler import constants, reader
-from pymusicassembler.player import Player, iter_frames, render_grid
+from pymusicassembler.player import Player, iter_frames, power_on_ram, render_grid
 
 NREG = 25
 
@@ -212,3 +214,107 @@ def test_play_wrapper_runs_on_the_cpu(tune_path):
     wrapped = Player(song).render_grid(60)
     assert [row[:24] for row in wrapped] == [row[:24] for row in direct]
     assert {row[24] for row in wrapped[1:]} == {0x1A}
+
+
+def test_power_on_ram_is_libsidplayfps():
+    ram = power_on_ram()
+    assert set(ram[:0x3FF]) == {0}
+    assert ram[0x0400:0x0408] == bytes((0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0))
+    assert ram[0x4000:0x4008] == bytes((0xFF, 0xFF, 0, 0, 0, 0, 0xFF, 0xFF))
+    assert ram[0x8000:0x8008] == ram[0x0400:0x0408]
+    assert ram[0xFFF8:] == ram[0x4000:0x4008]
+
+
+def test_unloaded_ram_reads_the_power_on_pattern(tune_path):
+    song = reader.read(tune_path)
+    player = Player(song)
+    end = song.load_addr + len(song.image)
+    assert (
+        player.memory[end + 0x400 : end + 0x600]
+        == power_on_ram()[end + 0x400 : end + 0x600]
+    )
+
+
+def test_snapshot_keeps_the_pulse_width_nibble(tune_path):
+    player = Player(reader.read(tune_path))
+    player._wr(0xD403, 0x1F)
+    player._wr(0xD40A, 0xF2)
+    regs = player.snapshot()
+    assert regs[3] == 0x0F and regs[10] == 0x02
+
+
+def _wrapped(song, code):
+    """``song`` with ``code(wrapper_address)`` appended as its play routine."""
+    wrapper = song.load_addr + len(song.image)
+    song.image = bytes(song.image) + bytes(code(wrapper))
+    song.play_addr = wrapper
+    return song
+
+
+def _twin(song):
+    """``song`` with a second play entry, at ``$F021``, into the same player."""
+    entry = Player(song).layout.entry
+    image = bytearray(song.image)
+    at = entry - song.load_addr
+    body = bytes(image[at : at + 0x1B])
+    song.image = bytes(image) + bytes(0xF021 - song.load_addr - len(image)) + body
+    return song, entry
+
+
+def test_self_modified_play_call_is_probed(tune_path):
+    song, first = _twin(reader.read(tune_path))
+    song = _wrapped(
+        song,
+        lambda w: (
+            0xA9,
+            0xF0,
+            0x8D,
+            (w + 7) & 0xFF,
+            (w + 7) >> 8,
+            0x20,
+            0x21,
+            0x00,
+            0x60,
+        ),
+    )
+    player = Player(song)
+    assert player.layout.entry == 0xF021 != first
+    player.render_grid(4)
+    assert player.memory[song.play_addr + 7] == 0xF0
+
+
+def test_every_player_instance_called_is_modelled(tune_path):
+    song, first = _twin(reader.read(tune_path))
+    song = _wrapped(
+        song, lambda w: (0x20, first & 0xFF, first >> 8, 0x20, 0x21, 0xF0, 0x60)
+    )
+    player = Player(song)
+    player.render_grid(4)
+    assert sorted(player._layouts) == [first, 0xF021]
+
+
+def test_sweep_follows_its_own_operands(tune_path):
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    owner = FREE + 0x100
+    player._wr(owner, 1)
+    player._wr(lay.filter_owner, 0)
+    player._lay = replace(lay, sweep_owner=owner)
+    player._wr(lay.sweep_ctr, 2)
+    player._wr(lay.sweep_acc, 0x40)
+    player._wr(lay.sweep_step, 0x10)
+    player._wr(lay.note_ctl, constants.CTL_TRIGGERED)
+    player._wr(lay.note_ctl + 1, constants.CTL_TRIGGERED)
+    player._sustain(0, lay.instr, constants.CTL_TRIGGERED)
+    assert player._rd(lay.sweep_ctr) == 2
+    player._sustain(1, lay.instr, constants.CTL_TRIGGERED)
+    assert player._rd(lay.sweep_dec) == 1
+    assert player._rd(lay.sweep_sta) == player.snapshot()[22] == 0x50
+
+
+def test_registers_are_written_to_the_players_sid(tune_path):
+    player = Player(reader.read(tune_path))
+    player._lay = replace(player.layout, sid=0xD500)
+    player._wr(0xD404, 0x00)
+    player._set(constants.CTRL_REG, 0x41)
+    assert player._rd(0xD504) == 0x41 and player.snapshot()[4] == 0x00

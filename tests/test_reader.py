@@ -85,7 +85,7 @@ def test_rejects_missing_player_signature(tune_path):
     image = bytearray(song.image)
     at = bytes(image).index(bytes((0x29, 0x03, 0xA8, 0xB9)))
     image[at] = 0xEA
-    with pytest.raises(SidParseError, match=r"signatures not found \(arp\)"):
+    with pytest.raises(SidParseError, match=r"signatures not found \(to_arp at"):
         parse(_prg(song, image))
 
 
@@ -98,9 +98,9 @@ def test_rejects_base_outside_image(tune_path):
         song.load_addr + len(song.image),
     )
     image = bytearray(song.image)
-    at = bytes(image).index(bytes((0x85, 0xFA, 0xBD))) - 2
-    assert image[at] | (image[at + 1] << 8) == lay.order_lo
-    image[at + 1] ^= 0x80
+    lo = bytes((0xBD, lay.order_lo & 0xFF, lay.order_lo >> 8, 0x85, 0xFA))
+    at = bytes(image).index(lo, bytes(image).index(lo) + 1) + 2
+    image[at] ^= 0x80
     with pytest.raises(SidParseError, match="order_lo base .* outside image"):
         parse(_prg(song, image))
 
@@ -138,7 +138,7 @@ def test_relocating_rip_is_read_after_init(tune_path):
 
 def test_relocating_prg_without_init_is_rejected(tune_path):
     data = relocating_rip(read(tune_path))
-    with pytest.raises(SidParseError, match="outside image"):
+    with pytest.raises(SidParseError, match="unsupported variant"):
         parse(bytes((0x00, 0xC0)) + data[0x7C:])
 
 
@@ -150,3 +150,21 @@ def test_pattern_keeps_inline_ff_args(tune_path):
     # byte is $FF inside a pattern; that pattern must be longer than the
     # bytes up to that $FF.
     assert any(constants.PATTERN_END in pat.data for pat in song.patterns) or True
+
+
+@pytest.mark.parametrize(
+    "data,jump,count",
+    [
+        ((0x01, 0x00, 0x02, 0x10, 0xFF), None, 2),
+        ((0x01, 0x00, 0xFE, 0x00, 0x05, 0x00), None, 2),
+        ((0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF), constants.ORDER_JUMP, 2),
+        ((0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF), None, 3),
+    ],
+)
+def test_orderlist_ends_where_the_player_stops_reading(data, jump, count):
+    view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(data), 0x1000)
+    bases = {"order_lo": 0x1000, "order_hi": 0x1001}
+    orderlist = reader._parse_orderlist(  # pylint: disable=protected-access
+        view, bases, 0, jump
+    )
+    assert len(orderlist.entries) == count

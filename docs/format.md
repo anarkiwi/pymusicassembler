@@ -13,11 +13,13 @@ Tunes are consumed as `.sid` (PSID/RSID) containers or bare `.prg` images
 through the shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker)
 base. Player builds differ in load address and layout, so
 `pymusicassembler.layout` **discovers** every work cell and table from the
-operands of the instructions that use them, matched by opcode skeleton nearest
-the play entry. The play entry is the `LDX #0; DEC tempo; BMI` the header's play
-routine reaches (through `JMP`/`JSR`; the IRQ vectors for play address 0). A
-tune whose tables lie outside the loaded image is read after its init runs in
-the emulator.
+operands of the instructions that use them, in the routine the play entry's own
+control flow reaches (its `JSR`/`JMP` targets and branch offsets, through `JMP`
+trampolines), so player copies packed side by side never mix. The play entry is
+the `LDX #0; DEC tempo; BMI` the header's play routine reaches, found by running
+that routine on the CPU after init (it may self-modify its `JSR`), else by
+following its `JMP`/`JSR`s (the IRQ vectors for play address 0). A tune whose
+tables lie outside the loaded image is read after its init runs in the emulator.
 
 | Build | Layout | Extra commands |
 | --- | --- | --- |
@@ -99,6 +101,16 @@ the `sidtrace` oracle. Facts a naive read of the Ghidra decompile
 - **An instrument byte followed by a duration gates off**, exactly like a bare
   duration (`BCS` to the same code).
 - **RES_FILT presets** come from the player's own 3-byte table.
+- **The filter machinery is self-modified code.** Each instruction's own
+  operand is the cell it uses, so a copy relocated inconsistently plays as the
+  CPU runs it.
+- **A silence-pattern (`$FE`) entry parks the voice for good**, so the orderlist
+  ends there even without `$FF`.
+
+The player runs on libsidplayfp's memory: RAM holds its power-up pattern and the
+PSID driver zeroes `$0000-$03FE`, so records read past the image match. The
+tune's play routine runs on the CPU, and every call into a player instance
+(there may be several, on several SIDs) is modelled.
 
 ## Player and playback notes
 
@@ -135,6 +147,11 @@ HVSC song length:
 | Filter owner / trigger-reset values | After8ty 01 |
 | Default song 2 (init selects the song) | Holiday Dream 91 Endpart |
 | Player copy placed by init | Kids (Hultink) |
+| Pulse-width high upper nibble | Variation (Ramos) |
+| Records past the image read power-up RAM | Triumph (original mix) |
+| Orderlist parked on the silence pattern | Evacuation |
+| Self-modified play call into a song's copy | Nether (preview) |
+| Two player instances, second SID | Double 2SID |
 
 All are single-speed. See [oracle-testing.md](oracle-testing.md) for how the
 oracle comparison works.

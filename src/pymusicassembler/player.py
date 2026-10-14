@@ -7,15 +7,31 @@ player's work cells, at the addresses :mod:`pymusicassembler.layout` finds.
 
 from typing import List, Optional
 
+import numpy as np
 from pysidtracker import MemPlayer, run_to_rts, wire_mpu
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
-from pysidtracker.registers import RES_FILT, SR
+from pysidtracker.registers import PW_HI_REGS, RES_FILT, SR
 
 from pymusicassembler import constants, layout
 from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.model import Song
 
 MAX_CYCLES = 8_000_000
+IO = slice(0xD000, 0xE000)
+DRIVER_CLEARED = slice(0x0000, 0x03FF)
+
+
+def power_on_ram() -> bytes:
+    """libsidplayfp's RAM before a tune loads.
+
+    Per 16K bank ``$00``/``$FF`` with 4-byte runs of the other value at offsets
+    2-5 of every 8 (banks 1 and 3 inverted); the PSID driver zeroes ``$0000-$03FE``.
+    """
+    addr = np.arange(0x10000)
+    run = (addr & 7 >= 2) & (addr & 7 < 6)
+    ram = np.where(run ^ ((addr >> 14) & 1).astype(bool), 0xFF, 0).astype(np.uint8)
+    ram[DRIVER_CLEARED] = 0
+    return ram.tobytes()
 
 
 class Player(MemPlayer):
@@ -27,6 +43,9 @@ class Player(MemPlayer):
     def __init__(self, song: Song, subtune: int = 0):
         self._song = song
         self._mpu = self._bus = None
+        self._entries = set()
+        self._layouts = {}
+        self._lay: Optional[layout.Layout] = None
         self.layout: Optional[layout.Layout] = None
         super().__init__(song.image, song.load_addr, subtune)
 
@@ -36,13 +55,25 @@ class Player(MemPlayer):
         return self.layout.entry - constants.NATIVE_PLAY_OFFSET
 
     @property
+    def memory(self) -> bytes:
+        """The 64 KiB the player runs in (after init, and every call since)."""
+        return bytes(self._mem)
+
+    @property
     def tempo_reload(self) -> int:
         """The play-call divider reload (``LDA #n`` at the play entry's BMI target)."""
         return self._rd(self.layout.tempo_reload)
 
+    def snapshot(self) -> List[int]:
+        """The SID register file, pulse-width highs masked to the nibble the SID uses."""
+        regs = super().snapshot()
+        for reg in PW_HI_REGS:
+            regs[reg] &= 0x0F
+        return regs
+
     # -- memory helpers --------------------------------------------------
     def _set(self, offset: int, value: int) -> None:
-        self._wr(self.SID_BASE + offset, value)
+        self._wr(self._lay.sid + offset, value)
 
     def _ptr(self, lo: int, hi: int, index: int) -> int:
         return self._rd(lo + index) | (self._rd(hi + index) << 8)
@@ -54,23 +85,51 @@ class Player(MemPlayer):
 
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
+        ram = bytearray(power_on_ram())
+        ram[IO] = self._mem[IO]
+        end = self._load + len(self._song.image)
+        ram[self._load : end] = self._mem[self._load : end]
+        self._mem[:] = ram
         self._mpu, self._bus = wire_mpu(self._mem)
         run_to_rts(self._mpu, self._bus, self._song.init_addr, subtune, MAX_CYCLES)
-        entry = layout.resolve_entry(self._mem, self._song.play_addr)
+        self._entries = {m.addr for m in layout.play_entries(self._mem)}
+        play = self._song.play_addr
+        entry = self._probe(play) if play else None
+        if entry is None:
+            entry = layout.resolve_entry(self._mem, play)
         if entry is None:
             raise MusicAssemblerParseError("no play entry after init")
-        self.layout = layout.discover(self._mem, entry)
+        self.layout = self._lay = self._instance(entry)
+
+    def _instance(self, entry: int) -> layout.Layout:
+        """The layout of the player instance whose play entry is ``entry``."""
+        if entry not in self._layouts:
+            self._layouts[entry] = layout.discover(self._mem, entry)
+        return self._layouts[entry]
 
     # -- one play call -----------------------------------------------------
     def _frame(self) -> None:
         play = self._song.play_addr
         if play in (0, self.layout.entry):
-            self._play()
+            self._play(self.layout)
         else:
-            self._drive(play)
+            self._call(play)
 
-    def _drive(self, play: int) -> None:
-        """Run the tune's play routine on the CPU, modelling each player call."""
+    def _probe(self, play: int) -> Optional[int]:
+        """The play entry the play routine reaches first, leaving no trace."""
+        mpu = self._mpu
+        mem = bytes(self._mem)
+        regs = (mpu.pc, mpu.sp, mpu.a, mpu.x, mpu.y, mpu.p, mpu.processorCycles)
+        entry = self._call(play, probe=True)
+        self._mem[:] = mem
+        mpu.pc, mpu.sp, mpu.a, mpu.x, mpu.y, mpu.p, mpu.processorCycles = regs
+        return entry
+
+    def _call(self, play: int, probe: bool = False) -> Optional[int]:
+        """Run the play routine on the CPU, modelling each call into the player.
+
+        With ``probe`` stop at, and return, the first play entry reached.
+        """
         mpu, bus = self._mpu, self._bus
         top = mpu.sp
         for byte in (0x00, 0x01):
@@ -79,16 +138,19 @@ class Player(MemPlayer):
         mpu.pc = play
         start = mpu.processorCycles
         while mpu.sp < top and mpu.processorCycles - start < MAX_CYCLES:
-            if mpu.pc == self.layout.entry:
-                self._play()
-                mpu.sp = (mpu.sp + 2) & 0xFF
-                ret = bus[0x00FF + mpu.sp] | (bus[0x0100 + mpu.sp] << 8)
-                mpu.pc = (ret + 1) & 0xFFFF
-            else:
+            if mpu.pc not in self._entries:
                 mpu.step()
+                continue
+            if probe:
+                return mpu.pc
+            self._play(self._instance(mpu.pc))
+            mpu.sp = (mpu.sp + 2) & 0xFF
+            ret = bus[0x00FF + mpu.sp] | (bus[0x0100 + mpu.sp] << 8)
+            mpu.pc = (ret + 1) & 0xFFFF
+        return None
 
-    def _play(self) -> None:
-        lay = self.layout
+    def _play(self, lay: layout.Layout) -> None:
+        self._lay = lay
         if self._inc(lay.tempo, -1) < 0x80:
             for v in range(constants.VOICES):
                 self._output(v)
@@ -102,7 +164,7 @@ class Player(MemPlayer):
 
     # -- pattern parse -----------------------------------------------------
     def _parse(self, v: int) -> None:
-        lay = self.layout
+        lay = self._lay
         pid = self._rd(lay.pattern_id + v)
         if pid == constants.SILENCE_PATTERN:
             self._gate_off(v)
@@ -127,17 +189,17 @@ class Player(MemPlayer):
         self._row_end(v, pat, y)
 
     def _gate_off(self, v: int) -> None:
-        addr = self.layout.ctrl + v
+        addr = self._lay.ctrl + v
         self._wr(addr, self._rd(addr) & 0xFE)
 
     def _duration(self, v: int, val: int) -> None:
-        lay = self.layout
+        lay = self._lay
         self._wr(lay.dur + v, val & constants.CTL_DUR_MASK)
         self._wr(lay.ctrl_mask + v, 0xFE)
         self._gate_off(v)
 
     def _note(self, v: int, pat: int, y: int, note: int) -> int:
-        lay = self.layout
+        lay = self._lay
         idx = ((self._rd(lay.transrep + v) >> 4) + note) & 0xFF
         self._wr(lay.note_index + v, idx)
         for table, work, vib in (
@@ -175,7 +237,7 @@ class Player(MemPlayer):
         return y
 
     def _row_end(self, v: int, pat: int, y: int) -> None:
-        lay = self.layout
+        lay = self._lay
         y = (y + 1) & 0xFF
         if self._rd(pat + y) != constants.PATTERN_END:
             self._wr(lay.pat_cursor + v, y)
@@ -206,7 +268,7 @@ class Player(MemPlayer):
 
     # -- per-call output -----------------------------------------------------
     def _output(self, v: int) -> None:
-        lay = self.layout
+        lay = self._lay
         x8 = self._rd(lay.instr_x8 + v)
         rec = lay.instr + x8
         ctl = self._rd(lay.note_ctl + v)
@@ -217,7 +279,7 @@ class Player(MemPlayer):
         self._sid_final(v)
 
     def _trigger(self, v: int, rec: int, ctl: int) -> None:
-        lay = self.layout
+        lay = self._lay
         ofs = self._rd(lay.voice_reg + v)
         self._wr(lay.instr_cursor + v, 0)
         self._set(ofs + SR, self._rd(rec + constants.INSTR_SR))
@@ -227,9 +289,9 @@ class Player(MemPlayer):
         pulse = self._rd(rec + constants.INSTR_PULSE_INIT)
         self._wr(lay.pw_lo + v, pulse)
         self._wr(lay.pw_hi + v, pulse)
-        if v == self._rd(lay.filter_owner):
-            self._wr(lay.fc_acc, self._rd(lay.fc_acc_reset))
-            self._wr(lay.fc_ctr, self._rd(lay.fc_ctr_reset))
+        if v == self._rd(lay.trigger_owner):
+            self._wr(lay.fc_acc, self._rd(lay.trigger_acc))
+            self._wr(lay.fc_ctr, self._rd(lay.trigger_ctr))
         self._wr(lay.pw_substep + v, 0)
         self._wr(lay.pw_dir + v, 0)
         self._wr(lay.porta_ctr + v, self._rd(rec + constants.INSTR_ARP_SPEED) >> 3)
@@ -237,10 +299,12 @@ class Player(MemPlayer):
         self._wr(lay.flags + v, self._rd(rec + constants.INSTR_PORTA))
 
     def _sustain(self, v: int, rec: int, ctl: int) -> None:
-        lay = self.layout
-        if v == self._rd(lay.filter_owner) and self._rd(lay.fc_ctr):
-            self._inc(lay.fc_ctr, -1)
-            self._set(FC_HI, self._inc(lay.fc_acc, self._rd(lay.fc_step)))
+        lay = self._lay
+        if v == self._rd(lay.sweep_owner) and self._rd(lay.sweep_ctr):
+            self._inc(lay.sweep_dec, -1)
+            cutoff = self._rd(lay.sweep_acc) + self._rd(lay.sweep_step)
+            self._wr(lay.sweep_sta, cutoff)
+            self._set(FC_HI, cutoff & 0xFF)
         flags = self._rd(lay.flags + v)
         if flags & 0x0F:
             self._program(v, flags & 0x0F)
@@ -249,7 +313,7 @@ class Player(MemPlayer):
         self._pulse(v, rec, self._rd(lay.flags + v))
 
     def _arp(self, v: int, rec: int) -> None:
-        lay = self.layout
+        lay = self._lay
         if self._inc(lay.porta_ctr + v, -1) < 0x80:
             return
         self._inc(lay.porta_ctr + v, 1)
@@ -272,7 +336,7 @@ class Player(MemPlayer):
             self._inc(lay.arp_phase + v, 1)
 
     def _program(self, v: int, prog: int) -> None:
-        lay = self.layout
+        lay = self._lay
         base = self._ptr(lay.inner_lo, lay.inner_hi, prog)
         cur = self._rd(lay.instr_cursor + v)
         self._wr(lay.ctrl + v, self._rd(base + cur) & self._rd(lay.ctrl_mask + v))
@@ -282,7 +346,7 @@ class Player(MemPlayer):
         pitch &= 0x7F
         cutoff = self._rd(base + ((cur + 2) & 0xFF))
         if cutoff:
-            self._wr(lay.fc_acc, cutoff)
+            self._wr(lay.program_acc, cutoff)
         nxt = (cur + 3) & 0xFF
         marker = self._rd(base + nxt)
         if lay.program_jump and marker == layout.PROGRAM_JUMP:
@@ -297,7 +361,7 @@ class Player(MemPlayer):
         self._wr(lay.freq_hi_w + v, self._rd(lay.freq_hi + pitch))
 
     def _pulse(self, v: int, rec: int, flags: int) -> None:
-        lay = self.layout
+        lay = self._lay
         speed = self._rd(rec + constants.INSTR_PULSE_STEP)
         lo, hi = lay.pw_lo + v, lay.pw_hi + v
         if flags & 0x40:
@@ -318,10 +382,10 @@ class Player(MemPlayer):
                 self._wr(lay.pw_dir + v, self._rd(lay.pw_dir + v) ^ 1)
 
     def _sid_final(self, v: int) -> None:
-        lay = self.layout
+        lay = self._lay
         ofs = self._rd(lay.voice_reg + v)
         self._set(ofs + CTRL, self._rd(lay.ctrl + v))
-        self._set(ofs + PW_HI, self._rd(lay.pw_hi + v) & 0x0F)
+        self._set(ofs + PW_HI, self._rd(lay.pw_hi + v))
         self._set(ofs + PW_LO, self._rd(lay.pw_lo + v))
         if self._rd(lay.note_ctl + v) & constants.CTL_VIBARP:
             toggled = 0
