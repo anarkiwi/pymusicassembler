@@ -1,32 +1,25 @@
 """Read a Music Assembler tune (PSID/.sid or .prg image) into a Song.
 
-A PSID/RSID container wraps the raw C64 image (player code + song data)
-with a header giving the load/init/play addresses.  The Music Assembler
-player binary is relocated per tune (across HVSC the same player loads at
-$1000, $c000, ... -- only a handful load at the $1021 the original fixed
-operand offsets were calibrated to), so a pointer-table base cannot be
-read at a fixed image offset.  The reader instead locates each
-table-loading instruction by its opcode skeleton (a relocation-invariant
-signature) and reads the base from its operand, then follows the bases to
-extract the orderlists, patterns, instruments and note-frequency tables.
-An unsupported player variant (no signature match, or a base outside the
-loaded image) raises :class:`MusicAssemblerParseError` rather than yielding garbage.
+Table bases come from the player code's own operands (see
+:mod:`pymusicassembler.layout`); a variant whose player is not found raises
+:class:`MusicAssemblerParseError` rather than yielding garbage.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 from pysidtracker import (
+    MEM_SIZE,
     BaseSidParser,
     CodePattern,
     Match,
     SidError,
     SidImage,
     find_code_all,
-    find_code_first,
     read_bytes,
+    run_init,
 )
 
-from pymusicassembler import constants
+from pymusicassembler import constants, layout
 from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.model import (
     Instrument,
@@ -59,7 +52,7 @@ def _parse_container(
         author = header.author
         released = header.released
         init = header.init_address or load
-        play = header.play_address or load
+        play = header.play_address
     else:  # bare .prg
         name = author = released = ""
         init = constants.DEFAULT_INIT
@@ -67,101 +60,41 @@ def _parse_container(
     return load, init, play, name, author, released, img.image, img.container
 
 
-# Player-code instruction signatures for each table-base operand.  The
-# Music Assembler player is relocated per tune (HVSC tunes load at $1000,
-# $c000, ... -- only 75 of ~6500 load at the $1021 the fixed operand
-# offsets were calibrated to), so a base cannot be read at a fixed offset.
-# Each base is instead read from the operand of the ``LDA table,X/Y`` that
-# consumes it, located by the instruction's opcode skeleton (operand words
-# captured, wildcarded).  The store targets that anchor them are
-# relocation-invariant: the orderlist/pattern pointers land in zero page
-# ($fa/$fb) which never moves, and the frequency work registers keep their
-# +3 (per-voice) stride.
-_PAT_ORDER = CodePattern(
-    "BD {order_lo:w} 85 FA BD {order_hi:w} 85 FB"
-)  # LDA a,X;STA $fa
-_PAT_PATTERN = CodePattern(
-    "B9 {pattern_lo:w} 85 FA B9 {pattern_hi:w} 85 FB"
-)  # LDA a,Y;STA $fa
-_PAT_INSTR = CodePattern("9D ?? ?? B9 {instr:w} 85 FA")  # STA a,X;LDA instr,Y;STA $fa
-_PAT_FREQ = CodePattern(
-    "B9 {freq_lo:w} 9D {work_lo:w} B9 {freq_hi:w} 9D {work_hi:w}"
-)  # two LDA,Y;STA,X
-# Play-routine entry: ``LDX #0; DEC tempo; BMI +$0c; JSR``.  The tempo
-# prescaler cell is base+$90, so ``base = tempo - $90`` locates the player
-# base independent of relocation (used to emit the native self-starting
-# format at ``base``, where the play routine sits at base+$21).
-_PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
-_PLAY_BMI_END = 7
-_PAT_RELOAD = CodePattern("A9 {reload:b} 8D {tempo:w}")
+_TABLES = (
+    "order_lo",
+    "order_hi",
+    "pattern_lo",
+    "pattern_hi",
+    "instr",
+    "freq_lo",
+    "freq_hi",
+)
 
 
-def _find_freq(image: SidImage, start: int, end: int) -> Optional[Match]:
-    """First ``LDA freq_lo,Y; STA work; LDA freq_hi,Y; STA work+3`` pair.
+def discover_layout(image: SidImage, play: int, start: int, end: int) -> layout.Layout:
+    """The :class:`~pymusicassembler.layout.Layout` of the player ``play`` reaches.
 
-    The two per-voice frequency work registers are three bytes apart in
-    every build, so the +3 store stride identifies the frequency loads
-    without depending on their (relocated) absolute work-RAM address.
+    Every table base must lie in ``[start, end)``; raises
+    :class:`MusicAssemblerParseError` otherwise or when the player is not found.
     """
-    for match in find_code_all(image, _PAT_FREQ, start=start, end=end):
-        if match.captures["work_hi"] == match.captures["work_lo"] + 3:
-            return match
-    return None
-
-
-def _match_signatures(
-    image: SidImage, start: int, end: int
-) -> Dict[str, Optional[Match]]:
-    """Locate the four table-load instruction signatures in ``image``.
-
-    Returns a dict of the (still-present-or-``None``) matches over
-    ``[start, end)``, so both :func:`discover_bases` and the parser's
-    ``recognize`` predicate share one signature scan.
-    """
-    return {
-        "order": find_code_first(image, _PAT_ORDER, start=start, end=end),
-        "pattern": find_code_first(image, _PAT_PATTERN, start=start, end=end),
-        "instr": find_code_first(image, _PAT_INSTR, start=start, end=end),
-        "freq": _find_freq(image, start, end),
-    }
-
-
-def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
-    """Discover per-tune table base addresses from player-code operands.
-
-    Raises :class:`MusicAssemblerParseError` when the player-code signatures are
-    absent (an unsupported Music Assembler variant) or when a discovered
-    base falls outside the loaded image (a spurious match).
-    """
-    end = load + image_len
-    sig = _match_signatures(image, load, end)
-    order, pattern, instr, freq = (
-        sig["order"],
-        sig["pattern"],
-        sig["instr"],
-        sig["freq"],
-    )
-    if not all((order, pattern, instr, freq)):
-        missing = ",".join(name for name, match in sig.items() if match is None)
-        raise MusicAssemblerParseError(
-            f"player signatures not found ({missing}); unsupported variant"
-        )
-    bases = {
-        "order_lo": order.captures["order_lo"],
-        "order_hi": order.captures["order_hi"],
-        "pattern_lo": pattern.captures["pattern_lo"],
-        "pattern_hi": pattern.captures["pattern_hi"],
-        "instr": instr.captures["instr"],
-        "freq_lo": freq.captures["freq_lo"],
-        "freq_hi": freq.captures["freq_hi"],
-    }
-    for name, base in bases.items():
-        if not load <= base < end:
+    entry = layout.resolve_entry(image, play, start, end)
+    if entry is None:
+        raise MusicAssemblerParseError("no play entry found; unsupported variant")
+    lay = layout.discover(image, entry, start, end)
+    for name in _TABLES:
+        base = getattr(lay, name)
+        if not start <= base < end:
             raise MusicAssemblerParseError(
                 f"discovered {name} base {base:#06x} outside image "
-                f"[{load:#06x},{end:#06x}); unsupported variant"
+                f"[{start:#06x},{end:#06x}); unsupported variant"
             )
-    return bases
+    return lay
+
+
+def discover_bases(image: SidImage, load: int, image_len: int, play=None) -> dict:
+    """Per-tune table base addresses of the player in ``[load, load + image_len)``."""
+    lay = discover_layout(image, load if play is None else play, load, load + image_len)
+    return {name: getattr(lay, name) for name in _TABLES}
 
 
 def load_view(image: bytes, load: int) -> SidImage:
@@ -173,11 +106,13 @@ def load_view(image: bytes, load: int) -> SidImage:
     return SidImage.from_prg(bytes((load & 0xFF, load >> 8)) + image)
 
 
-def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
-    """The ``LDX #0; DEC tempo`` play entry (:data:`_PAT_PLAY`) at a standard base.
+_PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
 
-    The tempo-prescaler cell is ``base + $90``; a genuine image loads at ``base``
-    or ``base + $21``, so a match placing the base elsewhere is rejected.
+
+def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
+    """The native-layout play entry, whose tempo cell is ``base + $90``.
+
+    A genuine native image loads at ``base`` or ``base + $21``.
     """
     end = load + image_len
     for match in find_code_all(image, _PAT_PLAY, start=load, end=end):
@@ -188,27 +123,11 @@ def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
 
 
 def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int]:
-    """Locate the player base address, or ``None`` if the layout is non-standard."""
+    """Locate the native player base address, or ``None`` for another layout."""
     match = _play_entry(image, load, image_len)
     if match is None:
         return None
     return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
-
-
-def find_tempo_reload(image: SidImage, load: int, image_len: int) -> Optional[int]:
-    """The play entry's tempo-divider reload immediate, or ``None`` if absent.
-
-    The entry's ``BMI`` branches to ``LDA #n; STA tempo`` when the divider
-    underflows; ``n`` is the per-tune reload.
-    """
-    match = _play_entry(image, load, image_len)
-    if match is None:
-        return None
-    target = match.addr + _PLAY_BMI_END + image.peek(match.addr + _PLAY_BMI_END - 1)
-    reload = find_code_first(image, _PAT_RELOAD, start=target, end=target + 5)
-    if reload is None or reload.captures["tempo"] != match.captures["tempo"]:
-        return None
-    return reload.captures["reload"]
 
 
 def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
@@ -272,11 +191,12 @@ def _parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
     return Pattern(data=data)
 
 
-def _referenced_pattern_ids(orderlists: List[Orderlist]) -> List[int]:
+def _referenced_pattern_ids(orderlists: List[Orderlist], commands=()) -> List[int]:
+    skip = {constants.SILENCE_PATTERN, *commands}
     ids = set()
     for orderlist in orderlists:
         for entry in orderlist.entries:
-            if entry.pattern_id != constants.SILENCE_PATTERN:
+            if entry.pattern_id not in skip:
                 ids.add(entry.pattern_id)
     return sorted(ids)
 
@@ -290,17 +210,39 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
     return sorted(ids)
 
 
-def parse(data: bytes) -> Song:
-    """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song."""
-    load, init, play, name, author, released, image, header = _parse_container(data)
+def _locate(data: bytes, image: bytes, load: int, play: int):
+    """``(view, layout)``: the loaded image, else the image after emulated init."""
     img = load_view(image, load)
-    bases = discover_bases(img, load, len(image))
+    try:
+        return img, discover_layout(img, play, load, load + len(image))
+    except MusicAssemblerParseError as static_error:
+        try:
+            sid = SidImage.from_bytes(data)
+            run_init(sid)
+        except SidError:
+            raise static_error from None
+        return sid, discover_layout(sid, play, 0, MEM_SIZE)
+
+
+def parse(data: bytes) -> Song:
+    """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song.
+
+    A player whose tables lie outside the loaded image is read after its init
+    runs in the emulator (packed or relocating rips).
+    """
+    load, init, play, name, author, released, image, header = _parse_container(data)
+    img, lay = _locate(data, image, load, play)
+    if not header:
+        init, play = lay.init, lay.entry
+    bases = {name: getattr(lay, name) for name in _TABLES}
+    commands = {constants.ORDER_TEMPO} if lay.order_tempo else set()
+    commands |= {constants.ORDER_JUMP} if lay.order_jump else set()
 
     orderlists = [
         _parse_orderlist(img, bases, voice) for voice in range(constants.VOICES)
     ]
 
-    pattern_ids = _referenced_pattern_ids(orderlists)
+    pattern_ids = _referenced_pattern_ids(orderlists, commands)
     max_pid = max(pattern_ids) if pattern_ids else -1
     patterns = [_parse_pattern(img, bases, pid) for pid in range(max_pid + 1)]
 
@@ -358,15 +300,11 @@ class MusicAssemblerSidParser(BaseSidParser):
         return parse(data)
 
     def recognize(self, image: SidImage) -> object:
-        """Return the order-signature offset if the MA player is present.
-
-        The four table-load instruction signatures (order/pattern/instr/freq
-        stores) together are specific to the Music Assembler player; requiring
-        all four avoids false positives.  Searches the currently loaded image
-        region, so it also recognises the player after ``detect`` runs init
-        for a packed/relocating tune.
-        """
-        sig = _match_signatures(image, image.load, image.end)
-        if all(sig.values()):
-            return sig["order"].addr
-        return None
+        """The play-entry address if a whole MA player is in the loaded region."""
+        play = image.header.play_address if image.header else 0
+        try:
+            return discover_layout(
+                image, play or image.load, image.load, image.end
+            ).entry
+        except MusicAssemblerParseError:
+            return None

@@ -27,7 +27,7 @@ from pymusicassembler.reglog import (
 )
 from pymusicassembler.writer import build, build_native, validate, write
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "DurationEvent",

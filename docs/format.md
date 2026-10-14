@@ -11,11 +11,19 @@ to a byte-identical tune image.
 
 Tunes are consumed as `.sid` (PSID/RSID) containers or bare `.prg` images
 through the shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker)
-base. The player binary is identical across tunes; only its DATA and the
-addresses that data lives at differ, so the reader **discovers** each table base
-from the player code's 16-bit operands (relocation-safe — no fixed-address
-assumption). Packed/relocating builds are detected by running the tune's init;
-container headers are not trusted.
+base. Player builds differ in load address and layout, so
+`pymusicassembler.layout` **discovers** every work cell and table from the
+operands of the instructions that use them, matched by opcode skeleton nearest
+the play entry. The play entry is the `LDX #0; DEC tempo; BMI` the header's play
+routine reaches (through `JMP`/`JSR`; the IRQ vectors for play address 0). A
+tune whose tables lie outside the loaded image is read after its init runs in
+the emulator.
+
+| Build | Layout | Extra commands |
+| --- | --- | --- |
+| Original | play entry at `base+$21`, init at `base+$48` | none |
+| Order hook | as original; orderlist advance `JSR`s a hook | orderlist `$FD n`: jump to entry `n` |
+| Later | init before the play entry, `LDX #n` per voice | orderlist `$FC t`: tempo `t`; `$FD n`; wave-program `$FD r`: jump to row `r` |
 
 `write(song, dst, container="auto"|"psid"|"prg"|"native")` writes a tune image;
 `auto` re-emits the original container byte-identically. `build(read(image)) ==
@@ -74,19 +82,23 @@ and the decoded pattern events `NoteEvent` / `InstrumentEvent` / `DurationEvent`
 ### Notes vs the decompiled reference (decompile.c)
 
 The player was recovered from its disassembly and validated byte-exact against
-the `sidtrace` oracle. Two facts a naive read of the Ghidra decompile
+the `sidtrace` oracle. Facts a naive read of the Ghidra decompile
 (`decompile.c`) gets wrong, recovered from the raw disassembly:
 
 - **The bare-duration token (`$60–$7F`) DOES advance the pattern cursor** (the
   `$10c3` `JMP $1187`); the decompile's inlining made it look like an early
   return.
-- **Init does not clear most work RAM.** The init routine zeroes only
-  `$1081–$1090` (per-voice cursors / pattern id) and reloads pattern id /
-  transpose / repeat; every other per-voice work byte AND the self-modified
-  filter envelope (`$129e` accumulator, `$1296` gate, `$12a0` step, the
-  `$1265`/`$126a` voice-0 trigger-reset immediates) keep their loaded-image
-  values. A tune saved mid-playback bakes live state in, so the player seeds
-  from those image bytes — otherwise its first frames diverge.
+- **Init does not clear most work RAM.** It zeroes `$1081–$1090` and the
+  filter-owner immediate, and reloads pattern id / transpose / repeat; every
+  other work byte keeps its loaded-image value. The player therefore runs the
+  tune's own init in the emulator and keeps all of its state in that memory.
+- **The filter owner is also the trigger-reset voice.** A filter command stores
+  the voice in the `CPX #n` the trigger frame tests, and its two argument bytes
+  in the `LDA #` immediates that trigger reloads the cutoff accumulator and
+  sweep counter from; the cutoff sweep runs only on that voice.
+- **An instrument byte followed by a duration gates off**, exactly like a bare
+  duration (`BCS` to the same code).
+- **RES_FILT presets** come from the player's own 3-byte table.
 
 ## Player and playback notes
 
@@ -117,6 +129,12 @@ HVSC song length:
 | Feature | Tune |
 | --- | --- |
 | Per-tune tempo reload (`LDA #8`) | VHD (Greatrix) |
+| Later build (orderlist `$FC`/`$FD`, wave-program `$FD`) | Song (Cooper) |
+| Order-hook build (orderlist `$FD`) | Nightmare Slide Preview |
+| RES_FILT preset table | Bit Shit |
+| Filter owner / trigger-reset values | After8ty 01 |
+| Default song 2 (init selects the song) | Holiday Dream 91 Endpart |
+| Player copy placed by init | Kids (Hultink) |
 
 All are single-speed. See [oracle-testing.md](oracle-testing.md) for how the
 oracle comparison works.

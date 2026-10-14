@@ -1,526 +1,349 @@
 """Music Assembler playroutine as a :class:`pysidtracker.MemPlayer`.
 
-A faithful, byte-exact reimplementation of the Music Assembler player's
-per-frame DSP, recovered from the player's disassembly (``decompile.c``) and
-validated byte-exact against the sidtrace register oracle.  The control flow --
-tempo divider, orderlist + pattern walk, the 16-bit pulse-width sweep, the
-vibrato/arp frequency accumulators, the gate/retrigger idiom and the
-filter-cutoff sweep -- is the player's own algorithm; the per-tune ADDRESSES it
-operates on are discovered by the reader, so a relocated tune of the same player
-plays unchanged.
-
-:class:`MemPlayer` owns the SID register file (mounted at ``$D400`` in a flat 64
-KiB image), the post-init snapshot, the diffing ``play_frame`` and the
-``iter_frames``/``render_grid`` drivers.  This module supplies only the Music
-Assembler ``_init`` and ``_frame`` and the private DSP they run; SID writes land
-in ``$D400..`` via :meth:`_set` and are read back by the base ``snapshot``.
+The tune's own init runs in the 6502 emulator (selecting the subtune and
+placing any relocated data); the play call is then modelled in Python on the
+player's work cells, at the addresses :mod:`pymusicassembler.layout` finds.
 """
 
-from dataclasses import dataclass
 from typing import List, Optional
 
-from pysidtracker import MemPlayer
-from pysidtracker.registers import (
-    AD,
-    CTRL,
-    FC_HI,
-    FREQ_HI,
-    FREQ_LO,
-    MODE_VOL,
-    PW_HI,
-    PW_LO,
-    RES_FILT,
-    SR,
-)
+from pysidtracker import MemPlayer, run_to_rts, wire_mpu
+from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
+from pysidtracker.registers import RES_FILT, SR
 
-from pymusicassembler import constants, reader
+from pymusicassembler import constants, layout
+from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.model import Song
 
-SID_OFFSET = constants.SID_OFFSET
-
-
-@dataclass
-class _Voice:
-    """Per-voice work state (mirrors the player's ``$..,X`` work arrays)."""
-
-    # pylint: disable=too-many-instance-attributes  # mirrors the player state
-    pat_cursor: int = 0  # $1081
-    ctrl: int = 0  # $1084 waveform/CTRL
-    order_cursor: int = 0  # $1087 orderlist cursor
-    dur: int = 0  # $108a note-duration counter
-    pattern_id: int = 0  # $108d
-    note_index: int = 0  # $10c9
-    freq_lo: int = 0  # $10cc plain FREQ_LO
-    freq_hi: int = 0  # $10cf plain FREQ_HI
-    arp_substep: int = 0  # $10dd
-    pw_substep: int = 0  # $10e0
-    pw_dir: int = 0  # $10e3
-    transrep: int = 0  # $10e6 transpose(hi)/repeat(lo)
-    repeat_ctr: int = 0  # $10e9
-    ctrl_mask: int = 0xFF  # $1031 gate/CTRL AND-mask
-    note_ctl: int = 0  # $1141 note control byte
-    instr_cursor: int = 0  # $1144
-    vib_lo_step: int = 0  # $1147
-    vib_hi_step: int = 0  # $114a
-    porta_ctr: int = 0  # $114d
-    vib_freq_hi: int = 0  # $12b6 vibrato FREQ_HI accumulator
-    vib_toggle: int = 0  # $12b9
-    arp_phase: int = 0  # $12bd
-    instr_x8: int = 0  # $13d9 instrument id * 8 (record byte offset)
-    pw_lo: int = 0  # $13dc PW_LO accumulator
-    pw_hi: int = 0  # $13df PW_HI accumulator
-    vib_freq_lo: int = 0  # $13e2 vibrato FREQ_LO accumulator
-    flags: int = 0  # $00fd effect flags
-
-
-@dataclass
-class _Tables:
-    """Resolved per-tune table base addresses (absolute C64 addresses)."""
-
-    # pylint: disable=too-many-instance-attributes  # one field per table base
-    order_lo: int
-    order_hi: int
-    pattern_lo: int
-    pattern_hi: int
-    instr: int
-    freq_lo: int
-    freq_hi: int
-    inner_lo: int
-    inner_hi: int
-    arp: int
+MAX_CYCLES = 8_000_000
 
 
 class Player(MemPlayer):
-    """Play a :class:`~pymusicassembler.model.Song` one frame at a time.
+    """Play a :class:`~pymusicassembler.model.Song` one play call at a time.
 
-    A :class:`pysidtracker.MemPlayer`: the base owns the SID register file,
-    ``play_frame`` (all 25 registers on the first frame, changed registers
-    after), ``iter_frames`` and the forward-filled ``render_grid``; this class
-    supplies the Music Assembler ``_init``/``_frame`` and their private DSP.
+    ``subtune`` (0-based) is passed to the tune's init in the accumulator.
     """
 
-    # pylint: disable=too-many-instance-attributes  # full player machine state
     def __init__(self, song: Song, subtune: int = 0):
-        image = song.image
-        load = song.load_addr
-        view = reader.load_view(image, load)
-        self._base = reader.find_player_base(view, load, len(image))
-        self.tempo_reload = reader.find_tempo_reload(view, load, len(image))
-        self._tempo_reload = (
-            constants.TEMPO_DIVIDER if self.tempo_reload is None else self.tempo_reload
-        )
-        # Work-RAM and self-modified filter immediates live at fixed offsets
-        # from the player base; relocate the base-$1000 constants to the
-        # discovered base (0 shift for the standard $1000 build).
-        self._reloc = self._base - constants.WORK_BASE if self._base is not None else 0
-        self._tables = _resolve_tables(song, self._base)
-        self._voices = [_Voice() for _ in range(constants.VOICES)]
-        self._tempo = 0  # $1090 (init 0; underflows on frame 0 -> advance)
-        self._filter_owner = 0  # $1262
-        self._fc_acc = 0  # $129e accumulator (self-modified LDA immediate)
-        self._fc_ctr = 0  # $1296 gate counter (self-modified LDA immediate)
-        self._fc_step = 0  # $12a0 sweep step (self-modified ADC immediate)
-        self._fc_acc_reset = 0  # $1266 voice-0 trigger reset (per-tune immediate)
-        self._fc_ctr_reset = 0  # $126b voice-0 trigger reset (per-tune immediate)
-        super().__init__(image, load, subtune)
+        self._song = song
+        self._mpu = self._bus = None
+        self.layout: Optional[layout.Layout] = None
+        super().__init__(song.image, song.load_addr, subtune)
 
     @property
-    def base(self) -> Optional[int]:
-        """Discovered player base address, or ``None`` for a non-standard layout."""
-        return self._base
+    def base(self) -> int:
+        """Native player base: the play entry sits at ``base + $21``."""
+        return self.layout.entry - constants.NATIVE_PLAY_OFFSET
 
-    # -- raw image / work-RAM access ------------------------------------
-    def _work(self, addr: int, index: int = 0) -> int:
-        """Read a base-relative work-RAM / immediate byte, relocated."""
-        return self._rd(addr + self._reloc + index)
+    @property
+    def tempo_reload(self) -> int:
+        """The play-call divider reload (``LDA #n`` at the play entry's BMI target)."""
+        return self._rd(self.layout.tempo_reload)
 
+    # -- memory helpers --------------------------------------------------
     def _set(self, offset: int, value: int) -> None:
-        """Write one SID register (offset ``0..0x18`` within ``$D400..``)."""
         self._wr(self.SID_BASE + offset, value)
 
-    def _orderlist_addr(self, voice: int) -> int:
-        tab = self._tables
-        return self._rd(tab.order_lo + voice) | (self._rd(tab.order_hi + voice) << 8)
+    def _ptr(self, lo: int, hi: int, index: int) -> int:
+        return self._rd(lo + index) | (self._rd(hi + index) << 8)
 
-    def _pattern_addr(self, pattern_id: int) -> int:
-        tab = self._tables
-        lo = self._rd(tab.pattern_lo + pattern_id)
-        hi = self._rd(tab.pattern_hi + pattern_id)
-        return lo | (hi << 8)
+    def _inc(self, addr: int, delta: int) -> int:
+        value = (self._rd(addr) + delta) & 0xFF
+        self._wr(addr, value)
+        return value
 
-    def _inner_addr(self, flags: int) -> int:
-        tab = self._tables
-        return self._rd(tab.inner_lo + flags) | (self._rd(tab.inner_hi + flags) << 8)
+    # -- init --------------------------------------------------------------
+    def _init(self, subtune: int) -> None:
+        self._mpu, self._bus = wire_mpu(self._mem)
+        run_to_rts(self._mpu, self._bus, self._song.init_addr, subtune, MAX_CYCLES)
+        entry = layout.resolve_entry(self._mem, self._song.play_addr)
+        if entry is None:
+            raise MusicAssemblerParseError("no play entry after init")
+        self.layout = layout.discover(self._mem, entry)
 
-    def _instr_byte(self, idx: int, byte_off: int) -> int:
-        return self._rd(
-            self._tables.instr + idx * constants.INSTR_RECORD_SIZE + byte_off
-        )
-
-    def _freq_lo(self, note_index: int) -> int:
-        return self._rd(self._tables.freq_lo + note_index)
-
-    def _freq_hi(self, note_index: int) -> int:
-        return self._rd(self._tables.freq_hi + note_index)
-
-    def _res_preset(self, v: int) -> int:
-        return constants.RES_PRESETS[v]
-
-    # -- init ($1048) ----------------------------------------------------
-    def _init(self, subtune: int) -> None:  # pylint: disable=unused-argument
-        self._set(MODE_VOL, 0x1F)
-        self._set(RES_FILT, 0xF0)
-        # The init routine zeroes only $1081..$1090 (pat_cursor / ctrl /
-        # order_cursor / dur / pattern_id) and the filter-owner flag; every
-        # other work-RAM byte keeps its loaded-image value (a tune saved
-        # mid-playback bakes live state in).  Seed those from the image so the
-        # player's first frames match the chip's, then apply the init reloads.
-        # The filter-sweep state ($1262 owner, $129e acc, $1296 gate, $12a0
-        # step) is self-modified player code; init does not clear it, so it
-        # keeps the loaded-image immediates until a filter command / voice-0
-        # trigger overwrites them.
-        self._filter_owner = self._work(constants.WORK_FILTER_OWNER)
-        self._fc_acc = self._work(constants.WORK_FC_ACC)
-        self._fc_ctr = self._work(constants.WORK_FC_CTR)
-        self._fc_step = self._work(constants.WORK_FC_STEP)
-        # Voice-0 trigger reset values -- per-tune constants baked into the
-        # player code region (the player customises its filter-sweep envelope
-        # per tune).
-        self._fc_acc_reset = self._work(constants.WORK_FC_ACC_RESET)
-        self._fc_ctr_reset = self._work(constants.WORK_FC_CTR_RESET)
-        self._tempo = 0  # $1090 cleared by the init loop
-        for v, voice in enumerate(self._voices):
-            voice.pat_cursor = 0
-            voice.ctrl = 0
-            voice.order_cursor = 0
-            voice.dur = 0
-            voice.note_index = self._work(constants.WORK_NOTE_INDEX, v)
-            voice.freq_lo = self._work(constants.WORK_FREQ_LO, v)
-            voice.freq_hi = self._work(constants.WORK_FREQ_HI, v)
-            voice.arp_substep = self._work(constants.WORK_ARP_SUBSTEP, v)
-            voice.pw_substep = self._work(constants.WORK_PW_SUBSTEP, v)
-            voice.pw_dir = self._work(constants.WORK_PW_DIR, v)
-            voice.note_ctl = self._work(constants.WORK_NOTE_CTL, v)
-            voice.instr_cursor = self._work(constants.WORK_INSTR_CURSOR, v)
-            voice.vib_lo_step = self._work(constants.WORK_VIB_LO_STEP, v)
-            voice.vib_hi_step = self._work(constants.WORK_VIB_HI_STEP, v)
-            voice.porta_ctr = self._work(constants.WORK_PORTA_CTR, v)
-            voice.vib_freq_hi = self._work(constants.WORK_VIB_FREQ_HI, v)
-            voice.vib_toggle = self._work(constants.WORK_VIB_TOGGLE, v)
-            voice.arp_phase = self._work(constants.WORK_ARP_PHASE, v)
-            voice.instr_x8 = self._work(constants.WORK_INSTR_X8, v)
-            voice.pw_lo = self._work(constants.WORK_PW_LO, v)
-            voice.pw_hi = self._work(constants.WORK_PW_HI, v)
-            voice.vib_freq_lo = self._work(constants.WORK_VIB_FREQ_LO, v)
-            voice.ctrl_mask = self._work(constants.WORK_CTRL_MASK, v)
-            # WORK_FLAGS is zero-page ($00fd): always outside the image, never
-            # relocated -- it defaults to 0.
-            voice.flags = self._rd(constants.WORK_FLAGS + v)
-            # init reload: pattern_id / transrep / repeat from the orderlist.
-            order = self._orderlist_addr(v)
-            voice.pattern_id = self._rd(order)
-            second = self._rd(order + 1)
-            voice.transrep = second
-            voice.repeat_ctr = second & 0x0F
-
-    # -- one play call ($1021) ------------------------------------------
+    # -- one play call -----------------------------------------------------
     def _frame(self) -> None:
-        self._tempo = (self._tempo - 1) & 0xFF
-        advance = self._tempo >= 0x80  # signed < 0
-        if advance:
-            self._tempo = self._tempo_reload
-        for v in range(constants.VOICES):
-            voice = self._voices[v]
-            if not advance:
+        play = self._song.play_addr
+        if play in (0, self.layout.entry):
+            self._play()
+        else:
+            self._drive(play)
+
+    def _drive(self, play: int) -> None:
+        """Run the tune's play routine on the CPU, modelling each player call."""
+        mpu, bus = self._mpu, self._bus
+        top = mpu.sp
+        for byte in (0x00, 0x01):
+            bus[0x0100 + mpu.sp] = byte
+            mpu.sp = (mpu.sp - 1) & 0xFF
+        mpu.pc = play
+        start = mpu.processorCycles
+        while mpu.sp < top and mpu.processorCycles - start < MAX_CYCLES:
+            if mpu.pc == self.layout.entry:
+                self._play()
+                mpu.sp = (mpu.sp + 2) & 0xFF
+                ret = bus[0x00FF + mpu.sp] | (bus[0x0100 + mpu.sp] << 8)
+                mpu.pc = (ret + 1) & 0xFFFF
+            else:
+                mpu.step()
+
+    def _play(self) -> None:
+        lay = self.layout
+        if self._inc(lay.tempo, -1) < 0x80:
+            for v in range(constants.VOICES):
                 self._output(v)
-                continue
-            voice.dur = (voice.dur - 1) & 0xFF
-            if voice.dur >= 0x80:  # signed < 0 -> new row
-                self._advance_row(v)
+            return
+        self._wr(lay.tempo, self._rd(lay.tempo_reload))
+        for v in range(constants.VOICES):
+            if self._inc(lay.dur + v, -1) >= 0x80:
+                self._parse(v)
             else:
                 self._output(v)
 
-    # -- orderlist + pattern parse ($1091) ------------------------------
-    def _advance_row(self, v: int) -> None:
-        voice = self._voices[v]
-        if voice.pattern_id == constants.SILENCE_PATTERN:
-            voice.ctrl &= 0xFE
+    # -- pattern parse -----------------------------------------------------
+    def _parse(self, v: int) -> None:
+        lay = self.layout
+        pid = self._rd(lay.pattern_id + v)
+        if pid == constants.SILENCE_PATTERN:
+            self._gate_off(v)
             return
-        pat = self._pattern_addr(voice.pattern_id)
-        cursor = voice.pat_cursor
-        val = self._rd(pat + cursor)
-        if val >= constants.INSTR_MIN:
-            if val >= constants.LONGDUR_MIN:  # long-duration token
-                voice.dur = val & constants.CTL_DUR_MASK
-                self._after_row(v, pat, cursor)
-                return
-            # instrument select: id*8 kept in one byte, ASL wraps at 8 bits.
-            voice.instr_x8 = (val << 3) & 0xFF
-            cursor += 1
-            val = self._rd(pat + cursor)
+        pat = self._ptr(lay.pattern_lo, lay.pattern_hi, pid)
+        y = self._rd(lay.pat_cursor + v)
+        val = self._rd(pat + y)
+        if val >= constants.LONGDUR_MIN:
+            self._wr(lay.dur + v, val & constants.CTL_DUR_MASK)
+        elif val >= constants.INSTR_MIN:
+            self._wr(lay.instr_x8 + v, val << 3)
+            y = (y + 1) & 0xFF
+            val = self._rd(pat + y)
             if val >= constants.DUR_MIN:
-                voice.dur = val & constants.CTL_DUR_MASK
-                self._after_row(v, pat, cursor)
-                return
-            # else fall to note
-        elif val >= constants.DUR_MIN:  # bare duration token ($60..$7F)
-            # $10b6: dur = val & 0x1f, gate-off mask, gate off, then advance
-            # the cursor / check the pattern end (the $10c3 JMP $1187).
-            voice.dur = val & constants.CTL_DUR_MASK
-            voice.ctrl_mask = 0xFE
-            voice.ctrl &= 0xFE
-            self._after_row(v, pat, cursor)
-            return
-        self._parse_note(v, pat, cursor, val)
+                self._duration(v, val)
+            else:
+                y = self._note(v, pat, y, val)
+        elif val >= constants.DUR_MIN:
+            self._duration(v, val)
+        else:
+            y = self._note(v, pat, y, val)
+        self._row_end(v, pat, y)
 
-    def _parse_note(self, v: int, pat: int, cursor: int, note: int) -> None:
-        voice = self._voices[v]
-        idx = (voice.transrep >> 4) + note
-        voice.note_index = idx & 0xFF
-        voice.freq_lo = self._freq_lo(voice.note_index)
-        voice.vib_freq_lo = voice.freq_lo
-        voice.freq_hi = self._freq_hi(voice.note_index)
-        voice.vib_freq_hi = voice.freq_hi
-        cursor += 1
-        ctl = self._rd(pat + cursor)
-        voice.note_ctl = ctl
-        voice.dur = ctl & constants.CTL_DUR_MASK
-        if ctl >= constants.CTL_FILTER:  # filter command attached ($1150)
-            self._filter_owner = v
-            cursor += 1
-            param = self._rd(pat + cursor)
-            # step = (param & 0xf) * 2 - 0x10  (self-modified ADC immediate).
-            self._fc_step = (((param & 0x0F) << 1) - 0x10) & 0xFF
-            cursor += 1
-            third = self._rd(pat + cursor)
-            if third == 0:
+    def _gate_off(self, v: int) -> None:
+        addr = self.layout.ctrl + v
+        self._wr(addr, self._rd(addr) & 0xFE)
+
+    def _duration(self, v: int, val: int) -> None:
+        lay = self.layout
+        self._wr(lay.dur + v, val & constants.CTL_DUR_MASK)
+        self._wr(lay.ctrl_mask + v, 0xFE)
+        self._gate_off(v)
+
+    def _note(self, v: int, pat: int, y: int, note: int) -> int:
+        lay = self.layout
+        idx = ((self._rd(lay.transrep + v) >> 4) + note) & 0xFF
+        self._wr(lay.note_index + v, idx)
+        for table, work, vib in (
+            (lay.freq_lo, lay.freq_lo_w, lay.vib_freq_lo),
+            (lay.freq_hi, lay.freq_hi_w, lay.vib_freq_hi),
+        ):
+            self._wr(work + v, self._rd(table + idx))
+            self._wr(vib + v, self._rd(table + idx))
+        y = (y + 1) & 0xFF
+        ctl = self._rd(pat + y)
+        self._wr(lay.note_ctl + v, ctl)
+        self._wr(lay.dur + v, ctl & constants.CTL_DUR_MASK)
+        if ctl & constants.CTL_FILTER:
+            self._wr(lay.filter_owner, v)
+            y = (y + 1) & 0xFF
+            param = self._rd(pat + y)
+            self._wr(lay.fc_acc_reset, param)
+            self._wr(lay.fc_step, ((param & 0x0F) << 1) - 0x10)
+            y = (y + 1) & 0xFF
+            res = self._rd(pat + y)
+            if res == 0:
                 self._set(RES_FILT, 0xF0)
             else:
-                self._set(RES_FILT, self._res_preset(v))
-        elif ctl & constants.CTL_VIBARP:  # vibrato/arp params attached
-            cursor += 1
-            voice.vib_lo_step = self._rd(pat + cursor)
-            cursor += 1
-            voice.vib_hi_step = self._rd(pat + cursor)
-        voice.ctrl_mask = 0xFF
-        voice.vib_toggle = 0xFF
-        voice.arp_substep = 0
-        voice.arp_phase = 0
-        self._after_row(v, pat, cursor)
+                self._wr(lay.fc_ctr_reset, res)
+                self._set(RES_FILT, self._rd(lay.res_presets + v))
+        elif ctl & constants.CTL_VIBARP:
+            y = (y + 1) & 0xFF
+            self._wr(lay.vib_lo_step + v, self._rd(pat + y))
+            y = (y + 1) & 0xFF
+            self._wr(lay.vib_hi_step + v, self._rd(pat + y))
+        self._wr(lay.ctrl_mask + v, 0xFF)
+        self._wr(lay.vib_toggle + v, 0xFF)
+        self._wr(lay.arp_substep + v, 0)
+        self._wr(lay.arp_phase + v, 0)
+        return y
 
-    def _after_row(self, v: int, pat: int, cursor: int) -> None:
-        voice = self._voices[v]
-        cursor += 1
-        nb = self._rd(pat + cursor)
-        if nb == constants.PATTERN_END:
-            voice.repeat_ctr = (voice.repeat_ctr - 1) & 0xFF
-            if voice.repeat_ctr < 0x80:  # signed >= 0: replay pattern
-                voice.pat_cursor = 0
-                return
-            order = self._orderlist_addr(v)
-            ocur = voice.order_cursor + 2
-            if self._rd(order + ocur) == constants.ORDER_END:
-                ocur = 0
-            voice.order_cursor = ocur
-            voice.pattern_id = self._rd(order + ocur)
-            voice.transrep = self._rd(order + ocur + 1)
-            voice.repeat_ctr = voice.transrep & 0x0F
-            voice.pat_cursor = 0
-        else:
-            voice.pat_cursor = cursor
-
-    # -- per-frame output + generators ----------------------------------
-    def _output(self, v: int) -> None:
-        voice = self._voices[v]
-        ofs = SID_OFFSET[v]
-        triggered = voice.note_ctl & constants.CTL_TRIGGERED
-        if not triggered:  # NOTE-TRIGGER frame
-            voice.instr_cursor = 0
-            idx = voice.instr_x8 >> 3
-            self._set(ofs + SR, self._instr_byte(idx, constants.INSTR_SR))
-            self._set(ofs + AD, self._instr_byte(idx, constants.INSTR_AD))
-            self._set(ofs + CTRL, voice.ctrl & 0xFE)
-            voice.ctrl = self._instr_byte(idx, constants.INSTR_WAVEFORM)
-            pw_init = self._instr_byte(idx, constants.INSTR_PULSE_INIT)
-            voice.pw_lo = pw_init
-            voice.pw_hi = pw_init
-            if v == 0:
-                self._fc_acc = self._fc_acc_reset
-                self._fc_ctr = self._fc_ctr_reset
-            voice.pw_substep = 0
-            voice.pw_dir = 0
-            voice.porta_ctr = self._instr_byte(idx, constants.INSTR_ARP_SPEED) >> 3
-            voice.note_ctl |= constants.CTL_TRIGGERED
-            voice.flags = self._instr_byte(idx, constants.INSTR_PORTA)
-            self._sid_final(v)
+    def _row_end(self, v: int, pat: int, y: int) -> None:
+        lay = self.layout
+        y = (y + 1) & 0xFF
+        if self._rd(pat + y) != constants.PATTERN_END:
+            self._wr(lay.pat_cursor + v, y)
             return
-        # SUSTAIN frame.  Filter-cutoff sweep ($1290): only the owner voice
-        # runs it; while the gate counter ($1296) is nonzero, decrement it,
-        # add the step ($12a0) to the accumulator ($129e) and write FC_HI.
-        if v == self._filter_owner and self._fc_ctr != 0:
-            self._fc_ctr = (self._fc_ctr - 1) & 0xFF
-            self._fc_acc = (self._fc_acc + self._fc_step) & 0xFF
-            self._set(FC_HI, self._fc_acc)
-        flags = voice.flags & 0x0F
-        if flags != 0:
-            self._instrument_tick(v, flags)
-        elif (voice.note_ctl & constants.CTL_VIBARP) == 0 and (voice.flags & 0x10) != 0:
-            self._arp_walk(v)
-        self._pw_gen(v)
+        self._wr(lay.pat_cursor + v, 0)
+        if self._inc(lay.repeat + v, -1) < 0x80:
+            return
+        order = self._ptr(lay.order_lo, lay.order_hi, v)
+        y = (self._rd(lay.order_cursor + v) + 2) & 0xFF
+        while True:
+            val = self._rd(order + y)
+            if lay.order_tempo and val == constants.ORDER_TEMPO:
+                tempo = self._rd(order + ((y + 1) & 0xFF))
+                self._wr(lay.tempo_reload, tempo)
+                self._wr(lay.tempo, tempo)
+                y = (y + 2) & 0xFF
+            elif lay.order_jump and val == constants.ORDER_JUMP:
+                y = (self._rd(order + ((y + 1) & 0xFF)) << 1) & 0xFF
+            else:
+                break
+        if val == constants.ORDER_END:
+            y = 0
+        self._wr(lay.order_cursor + v, y)
+        self._wr(lay.pattern_id + v, self._rd(order + y))
+        transrep = self._rd(order + ((y + 1) & 0xFF))
+        self._wr(lay.transrep + v, transrep)
+        self._wr(lay.repeat + v, transrep & 0x0F)
+
+    # -- per-call output -----------------------------------------------------
+    def _output(self, v: int) -> None:
+        lay = self.layout
+        x8 = self._rd(lay.instr_x8 + v)
+        rec = lay.instr + x8
+        ctl = self._rd(lay.note_ctl + v)
+        if not ctl & constants.CTL_TRIGGERED:
+            self._trigger(v, rec, ctl)
+        else:
+            self._sustain(v, rec, ctl)
         self._sid_final(v)
 
-    def _arp_walk(self, v: int) -> None:
-        voice = self._voices[v]
-        voice.porta_ctr = (voice.porta_ctr - 1) & 0xFF
-        if voice.porta_ctr < 0x80:  # signed >= 0: not yet
+    def _trigger(self, v: int, rec: int, ctl: int) -> None:
+        lay = self.layout
+        ofs = self._rd(lay.voice_reg + v)
+        self._wr(lay.instr_cursor + v, 0)
+        self._set(ofs + SR, self._rd(rec + constants.INSTR_SR))
+        self._set(ofs + AD, self._rd(rec + constants.INSTR_AD))
+        self._set(ofs + CTRL, self._rd(lay.ctrl + v) & 0xFE)
+        self._wr(lay.ctrl + v, self._rd(rec + constants.INSTR_WAVEFORM))
+        pulse = self._rd(rec + constants.INSTR_PULSE_INIT)
+        self._wr(lay.pw_lo + v, pulse)
+        self._wr(lay.pw_hi + v, pulse)
+        if v == self._rd(lay.filter_owner):
+            self._wr(lay.fc_acc, self._rd(lay.fc_acc_reset))
+            self._wr(lay.fc_ctr, self._rd(lay.fc_ctr_reset))
+        self._wr(lay.pw_substep + v, 0)
+        self._wr(lay.pw_dir + v, 0)
+        self._wr(lay.porta_ctr + v, self._rd(rec + constants.INSTR_ARP_SPEED) >> 3)
+        self._wr(lay.note_ctl + v, ctl | constants.CTL_TRIGGERED)
+        self._wr(lay.flags + v, self._rd(rec + constants.INSTR_PORTA))
+
+    def _sustain(self, v: int, rec: int, ctl: int) -> None:
+        lay = self.layout
+        if v == self._rd(lay.filter_owner) and self._rd(lay.fc_ctr):
+            self._inc(lay.fc_ctr, -1)
+            self._set(FC_HI, self._inc(lay.fc_acc, self._rd(lay.fc_step)))
+        flags = self._rd(lay.flags + v)
+        if flags & 0x0F:
+            self._program(v, flags & 0x0F)
+        elif not ctl & constants.CTL_VIBARP and flags & 0x10:
+            self._arp(v, rec)
+        self._pulse(v, rec, self._rd(lay.flags + v))
+
+    def _arp(self, v: int, rec: int) -> None:
+        lay = self.layout
+        if self._inc(lay.porta_ctr + v, -1) < 0x80:
             return
-        voice.porta_ctr = (voice.porta_ctr + 1) & 0xFF
-        idx = voice.instr_x8 >> 3
-        step = self._instr_byte(idx, constants.INSTR_ARP_STEP)
-        phase = voice.arp_phase & 3
-        ascend = self._rd(self._tables.arp + phase)
-        if ascend == 0:  # descending
-            lo = voice.freq_lo - step
-            voice.freq_lo = lo & 0xFF
-            if lo < 0:
-                voice.freq_hi = (voice.freq_hi - 1) & 0xFF
-        else:  # ascending
-            lo = voice.freq_lo + step
-            voice.freq_lo = lo & 0xFF
-            if lo > 0xFF:
-                voice.freq_hi = (voice.freq_hi + 1) & 0xFF
-        voice.arp_substep = (voice.arp_substep + 1) & 0xFF
-        arpspeed = self._instr_byte(idx, constants.INSTR_ARP_SPEED) & 0x0F
-        if arpspeed == voice.arp_substep:
-            voice.arp_substep = 0
-            voice.arp_phase = (voice.arp_phase + 1) & 0xFF
+        self._inc(lay.porta_ctr + v, 1)
+        step = self._rd(rec + constants.INSTR_ARP_STEP)
+        lo, hi = lay.freq_lo_w + v, lay.freq_hi_w + v
+        ascend = self._rd(lay.arp + (self._rd(lay.arp_phase + v) & 3))
+        if not ascend:
+            borrow = self._rd(lo) < step
+            self._inc(lo, -step)
+            ascend = borrow and self._inc(hi, -1) == 0
+        if ascend:
+            carry = self._rd(lo) + step > 0xFF
+            self._inc(lo, step)
+            if carry:
+                self._inc(hi, 1)
+        if self._inc(lay.arp_substep + v, 1) == (
+            self._rd(rec + constants.INSTR_ARP_SPEED) & 0x0F
+        ):
+            self._wr(lay.arp_substep + v, 0)
+            self._inc(lay.arp_phase + v, 1)
 
-    def _instrument_tick(self, v: int, flags: int) -> None:
-        voice = self._voices[v]
-        base = self._inner_addr(flags)
-        cur = voice.instr_cursor
-        ctrl = self._rd(base + cur) & voice.ctrl_mask
-        voice.ctrl = ctrl
-        pitch = self._rd(base + cur + 1)
-        if pitch < 0x80:
-            pitch = (pitch + voice.note_index) & 0xFF
+    def _program(self, v: int, prog: int) -> None:
+        lay = self.layout
+        base = self._ptr(lay.inner_lo, lay.inner_hi, prog)
+        cur = self._rd(lay.instr_cursor + v)
+        self._wr(lay.ctrl + v, self._rd(base + cur) & self._rd(lay.ctrl_mask + v))
+        pitch = self._rd(base + ((cur + 1) & 0xFF))
+        if pitch < 0x80 or not lay.pitch_skip:
+            pitch += self._rd(lay.note_index + v)
         pitch &= 0x7F
-        cutoff = self._rd(base + cur + 2)
-        if cutoff != 0:
-            self._fc_acc = cutoff
-        marker = self._rd(base + cur + 3)
-        if marker >= 0xFE:
-            if marker == 0xFE:  # stop the effect
-                voice.flags &= 0xF0
-                cur = cur + 3
-            else:  # $FF: loop to start
-                cur = 0
-        else:
-            cur = cur + 3
-        voice.instr_cursor = cur
-        voice.freq_lo = self._freq_lo(pitch)
-        voice.freq_hi = self._freq_hi(pitch)
+        cutoff = self._rd(base + ((cur + 2) & 0xFF))
+        if cutoff:
+            self._wr(lay.fc_acc, cutoff)
+        nxt = (cur + 3) & 0xFF
+        marker = self._rd(base + nxt)
+        if lay.program_jump and marker == layout.PROGRAM_JUMP:
+            row = self._rd(base + ((nxt + 1) & 0xFF))
+            nxt = 0 if row == 0 or row >= nxt else (row * 3) & 0xFF
+        elif marker == 0xFE:
+            self._wr(lay.flags + v, self._rd(lay.flags + v) & 0xF0)
+        elif marker == 0xFF:
+            nxt = 0
+        self._wr(lay.instr_cursor + v, nxt)
+        self._wr(lay.freq_lo_w + v, self._rd(lay.freq_lo + pitch))
+        self._wr(lay.freq_hi_w + v, self._rd(lay.freq_hi + pitch))
 
-    def _pw_gen(self, v: int) -> None:
-        voice = self._voices[v]
-        idx = voice.instr_x8 >> 3
-        speed = self._instr_byte(idx, constants.INSTR_PULSE_STEP)
-        flags = voice.flags
-        if flags & 0x40:  # linear add
-            lo = voice.pw_lo + speed
-            voice.pw_lo = lo & 0xFF
-            voice.pw_hi = (voice.pw_hi + speed + (lo >> 8)) & 0xFF
-        elif flags & 0x20:  # triangle up/down
-            if voice.pw_dir:
-                lo = voice.pw_lo + speed
-                voice.pw_lo = lo & 0xFF
-                if lo > 0xFF:
-                    voice.pw_hi = (voice.pw_hi + 1) & 0xFF
+    def _pulse(self, v: int, rec: int, flags: int) -> None:
+        lay = self.layout
+        speed = self._rd(rec + constants.INSTR_PULSE_STEP)
+        lo, hi = lay.pw_lo + v, lay.pw_hi + v
+        if flags & 0x40:
+            carry = (self._rd(lo) + speed) >> 8
+            self._inc(lo, speed)
+            self._inc(hi, speed + carry)
+        elif flags & 0x20:
+            if self._rd(lay.pw_dir + v):
+                if self._rd(lo) + speed > 0xFF:
+                    self._inc(hi, 1)
+                self._inc(lo, speed)
             else:
-                lo = voice.pw_lo - speed
-                voice.pw_lo = lo & 0xFF
-                if lo < 0:
-                    voice.pw_hi = (voice.pw_hi - 1) & 0xFF
-            voice.pw_substep = (voice.pw_substep + 1) & 0xFF
-            if (speed & 0x0F) == voice.pw_substep:
-                voice.pw_substep = 0
-                voice.pw_dir ^= 1
+                if self._rd(lo) < speed:
+                    self._inc(hi, -1)
+                self._inc(lo, -speed)
+            if self._inc(lay.pw_substep + v, 1) == speed & 0x0F:
+                self._wr(lay.pw_substep + v, 0)
+                self._wr(lay.pw_dir + v, self._rd(lay.pw_dir + v) ^ 1)
 
     def _sid_final(self, v: int) -> None:
-        voice = self._voices[v]
-        ofs = SID_OFFSET[v]
-        self._set(ofs + CTRL, voice.ctrl)
-        self._set(ofs + PW_HI, voice.pw_hi & 0x0F)
-        self._set(ofs + PW_LO, voice.pw_lo)
-        if voice.note_ctl & constants.CTL_VIBARP:  # vibrato/arp-freq mode
-            if voice.vib_lo_step & 1:
-                voice.vib_toggle ^= 0xFF
-                if voice.vib_toggle != 0:
-                    self._set(ofs + FREQ_LO, voice.freq_lo)
-                    self._set(ofs + FREQ_HI, voice.freq_hi)
-                    return
-            lo = voice.vib_freq_lo + voice.vib_lo_step
-            voice.vib_freq_lo = lo & 0xFF
-            self._set(ofs + FREQ_LO, voice.vib_freq_lo)
-            voice.vib_freq_hi = (
-                voice.vib_freq_hi + voice.vib_hi_step + (lo >> 8)
-            ) & 0xFF
-            self._set(ofs + FREQ_HI, voice.vib_freq_hi)
-            return
-        self._set(ofs + FREQ_LO, voice.freq_lo)
-        self._set(ofs + FREQ_HI, voice.freq_hi)
-
-
-def _resolve_tables(song: Song, base: Optional[int]) -> _Tables:
-    """Resolve the per-tune table base addresses from the song's image.
-
-    The Music Assembler player binary is identical across tunes, so each
-    pointer-table base lives at a fixed offset *within the player code* as a
-    16-bit operand.  The ``OP_*`` offsets are measured from the play routine
-    (base+$21); an image whose bytes begin before it -- e.g. a native song
-    with the self-start stub at its base, or any rip that keeps the header --
-    shifts every operand by that much, so anchor on the discovered player
-    ``base`` rather than assuming the play routine is at image offset 0.
-    """
-    image = song.image
-    code_off = (
-        base + constants.NATIVE_PLAY_OFFSET - song.load_addr if base is not None else 0
-    )
-
-    def op16(off: int) -> int:
-        off += code_off
-        if off + 1 < len(image):
-            return image[off] | (image[off + 1] << 8)
-        return 0
-
-    return _Tables(
-        order_lo=op16(constants.OP_ORDER_LO),
-        order_hi=op16(constants.OP_ORDER_HI),
-        pattern_lo=op16(constants.OP_PATTERN_LO),
-        pattern_hi=op16(constants.OP_PATTERN_HI),
-        instr=op16(constants.OP_INSTR),
-        freq_lo=op16(constants.OP_FREQ_LO),
-        freq_hi=op16(constants.OP_FREQ_HI),
-        inner_lo=op16(constants.OP_INNER_LO),
-        inner_hi=op16(constants.OP_INNER_HI),
-        arp=op16(constants.OP_ARP),
-    )
+        lay = self.layout
+        ofs = self._rd(lay.voice_reg + v)
+        self._set(ofs + CTRL, self._rd(lay.ctrl + v))
+        self._set(ofs + PW_HI, self._rd(lay.pw_hi + v) & 0x0F)
+        self._set(ofs + PW_LO, self._rd(lay.pw_lo + v))
+        if self._rd(lay.note_ctl + v) & constants.CTL_VIBARP:
+            toggled = 0
+            if self._rd(lay.vib_lo_step + v) & 1:
+                toggled = self._rd(lay.vib_toggle + v) ^ 0xFF
+                self._wr(lay.vib_toggle + v, toggled)
+            if not toggled:
+                lo_step = self._rd(lay.vib_lo_step + v)
+                carry = (self._rd(lay.vib_freq_lo + v) + lo_step) >> 8
+                self._set(ofs + FREQ_LO, self._inc(lay.vib_freq_lo + v, lo_step))
+                hi_step = self._rd(lay.vib_hi_step + v) + carry
+                self._set(ofs + FREQ_HI, self._inc(lay.vib_freq_hi + v, hi_step))
+                return
+        self._set(ofs + FREQ_LO, self._rd(lay.freq_lo_w + v))
+        self._set(ofs + FREQ_HI, self._rd(lay.freq_hi_w + v))
 
 
 def iter_frames(song: Song, max_frames: Optional[int] = None):
-    """Yield per-frame register write lists for ``song``.
-
-    A thin :class:`Song`-to-:class:`Player` adapter over the inherited
-    :meth:`~pysidtracker.MemPlayer.iter_frames`.  Stops after ``max_frames``
-    frames (required for a non-looping render, since the player loops forever).
-    """
+    """Yield per-call register write lists for ``song`` (see :class:`MemPlayer`)."""
     return Player(song).iter_frames(max_frames)
 
 
 def render_grid(song: Song, nframes: int) -> List[List[int]]:
-    """Render ``nframes`` forward-filled per-frame register snapshots.
-
-    A thin :class:`Song`-to-:class:`Player` adapter over the inherited
-    :meth:`~pysidtracker.MemPlayer.render_grid`.
-    """
+    """Render ``nframes`` forward-filled per-call register snapshots."""
     return Player(song).render_grid(nframes)

@@ -37,12 +37,12 @@ its whole song (`tests/test_oracle_songs.py`). See the table in [format.md](form
 whole-song comparison against the `sidtrace` oracle (Docker), over every subtune
 of every HVSC tune SIDId names `Music_Assembler` or `(Music_Assembler/MC)`
 (`PLAYER`). The `-m oracle` test renders through the same function. Its `info`
-reports the decoded build: `load_offset` (image load address minus the player
-base: `0`, or `33` for a rip starting at the play routine), `relocated` (base
-other than `$1000`), `tempo` (the play-call divider reload, the `LDA #n` the
-play entry's `BMI` branches to), `rsid`, and the play `trigger` and `speed`
-(calls per PAL frame, from `pysidtracker.playroutine_cadence`). The first three
-are `None` when the play entry is not found at a standard base. A tune the
+reports the decoded build: `load_offset` (image load address minus the nominal
+player base, the play entry less `$21`: `0`, or `33` for a rip starting at the
+play routine), `relocated` (base other than `$1000`), `tempo` (the play-call
+divider reload after init), `features` (the build's `order_tempo`,
+`order_jump` and `program_jump` commands), `rsid`, and the play `trigger` and
+`speed` (calls per PAL frame, from `pysidtracker.playroutine_cadence`). A tune the
 reader cannot decode raises `MusicAssemblerParseError` (a
 `pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
@@ -58,6 +58,15 @@ PYTHONPATH=scripts python -m pysidtracker.survey diff $HVSC .hvsc-survey/tunes.c
 ```
 
 `.hvsc-survey/` holds copyright-derived traces and is gitignored.
+
+Helpers for working through a survey:
+
+- `scripts/survey_sample.py SRC DST --per-class N` copies a stratified sample
+  (whole tunes per failure class, with their cached oracle traces) into `DST`
+  for a quick `survey run`; `--tally RESULTS` reports exact/total per class.
+- `scripts/layout_census.py HVSC tunes.csv` tallies which player builds
+  `pymusicassembler.layout` finds, statically and after init.
+- `scripts/disasm.py TUNE.sid [START [END]]` disassembles a tune image.
 
 ## Running locally
 
