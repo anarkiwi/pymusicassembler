@@ -22,13 +22,14 @@ def test_render_matches_player(tune_path):
     assert grid.dtype == np.int16
     np.testing.assert_array_equal(grid, Player(reader.parse(data)).render_grid(120))
     assert json.loads(json.dumps(info)) == info
-    song = reader.parse(data)
-    view = reader.load_view(song.image, song.load_addr)
-    base = reader.find_player_base(view, song.load_addr, len(song.image))
-    assert info["load_offset"] == song.load_addr - base
-    assert info["tempo"] == view.peek(base + 0x35)
-    assert view.peek(base + 0x34) == 0xA9
-    assert info["speed"] == 1
+    assert info == {
+        "load_offset": 0x21,
+        "relocated": False,
+        "tempo": 2,
+        "rsid": False,
+        "trigger": "pal_video",
+        "speed": 1,
+    }
 
 
 def test_render_selects_one_based_subtune(tune_path, monkeypatch):
@@ -55,6 +56,7 @@ def test_unknown_cadence_source_and_layout(tune_path, monkeypatch):
         lambda data, subtune: Cadence(PAL_CYCLES_PER_FRAME, None, PAL_CLOCK_HZ),
     )
     monkeypatch.setattr(reader, "find_player_base", lambda *_: None)
+    monkeypatch.setattr(reader, "find_tempo_reload", lambda *_: None)
     _, info = oracle_hvsc.render(tune_path.read_bytes(), 1, 10)
     assert info["trigger"] is None
     assert info["speed"] == 1

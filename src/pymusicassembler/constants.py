@@ -122,7 +122,6 @@ NATIVE_IRQ_EXIT = 0xEA31  # KERNAL IRQ return the stub's handler jumps to
 # into these addresses, so the player seeds its voice state from the
 # image here -- otherwise its first frames diverge from the oracle.
 WORK_MASTER_TEMPO = 0x1090  # global play-call tempo counter
-WORK_TEMPO_RELOAD = 0x1035  # play-call divider reload immediate (LDA #n)
 WORK_FILTER_OWNER = 0x1262  # filter-sweep owner voice
 WORK_NOTE_INDEX = 0x10C9
 WORK_FREQ_LO = 0x10CC

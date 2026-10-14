@@ -92,6 +92,8 @@ _PAT_FREQ = CodePattern(
 # base independent of relocation (used to emit the native self-starting
 # format at ``base``, where the play routine sits at base+$21).
 _PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
+_PLAY_BMI_END = 7
+_PAT_RELOAD = CodePattern("A9 {reload:b} 8D {tempo:w}")
 
 
 def _find_freq(image: SidImage, start: int, end: int) -> Optional[Match]:
@@ -171,23 +173,42 @@ def load_view(image: bytes, load: int) -> SidImage:
     return SidImage.from_prg(bytes((load & 0xFF, load >> 8)) + image)
 
 
-def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int]:
-    """Locate the player base address, or ``None`` if the layout is
-    non-standard.
+def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
+    """The ``LDX #0; DEC tempo`` play entry (:data:`_PAT_PLAY`) at a standard base.
 
-    The play routine's tempo-prescaler cell is ``base + 0x90``, found from
-    the ``LDX #0; DEC tempo`` play entry (:data:`_PAT_PLAY`).  A genuine
-    Music Assembler image loads either at ``base`` (the self-start stub /
-    PSID vectors precede the play routine) or at ``base + 0x21`` (a rip
-    that begins at the play routine itself); any other offset means the
-    player is not at the standard base+$21 entry, so the base is rejected.
+    The tempo-prescaler cell is ``base + $90``; a genuine image loads at ``base``
+    or ``base + $21``, so a match placing the base elsewhere is rejected.
     """
     end = load + image_len
     for match in find_code_all(image, _PAT_PLAY, start=load, end=end):
         base = match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
         if load - base in (0, constants.NATIVE_PLAY_OFFSET):
-            return base
+            return match
     return None
+
+
+def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int]:
+    """Locate the player base address, or ``None`` if the layout is non-standard."""
+    match = _play_entry(image, load, image_len)
+    if match is None:
+        return None
+    return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
+
+
+def find_tempo_reload(image: SidImage, load: int, image_len: int) -> Optional[int]:
+    """The play entry's tempo-divider reload immediate, or ``None`` if absent.
+
+    The entry's ``BMI`` branches to ``LDA #n; STA tempo`` when the divider
+    underflows; ``n`` is the per-tune reload.
+    """
+    match = _play_entry(image, load, image_len)
+    if match is None:
+        return None
+    target = match.addr + _PLAY_BMI_END + image.peek(match.addr + _PLAY_BMI_END - 1)
+    reload = find_code_first(image, _PAT_RELOAD, start=target, end=target + 5)
+    if reload is None or reload.captures["tempo"] != match.captures["tempo"]:
+        return None
+    return reload.captures["reload"]
 
 
 def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:

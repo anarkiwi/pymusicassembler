@@ -24,7 +24,7 @@ def render(data, song, nframes):
     info = {
         "load_offset": None if base is None else tune.load_addr - base,
         "relocated": None if base is None else base != WORK_BASE,
-        "tempo": None if base is None else player.tempo_reload,
+        "tempo": player.tempo_reload,
         "rsid": data[:4] == b"RSID",
         "trigger": cadence.source and cadence.source.value,
         "speed": round(PAL_CYCLES_PER_FRAME / cadence.cycles_per_call),

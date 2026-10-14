@@ -38,12 +38,12 @@ of every HVSC tune SIDId names `Music_Assembler` or `(Music_Assembler/MC)`
 (`PLAYER`). The `-m oracle` test renders through the same function. Its `info`
 reports the decoded build: `load_offset` (image load address minus the player
 base: `0`, or `33` for a rip starting at the play routine), `relocated` (base
-other than `$1000`), `tempo` (the play-call divider reload immediate), `rsid`,
-and the play `trigger` and `speed` (calls per PAL frame, from
-`pysidtracker.playroutine_cadence`). The first three are `None` when the player
-base is not found. A tune the reader cannot decode raises
-`MusicAssemblerParseError` (a `pysidtracker.SidParseError`), which the survey
-records as `not_decompiled`.
+other than `$1000`), `tempo` (the play-call divider reload, the `LDA #n` the
+play entry's `BMI` branches to), `rsid`, and the play `trigger` and `speed`
+(calls per PAL frame, from `pysidtracker.playroutine_cadence`). The first three
+are `None` when the play entry is not found at a standard base. A tune the
+reader cannot decode raises `MusicAssemblerParseError` (a
+`pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
 ```bash
 pip install "pysidtracker[survey]>=0.12.0"

@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from pymusicassembler import constants
+from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError
 from pymusicassembler.reader import parse, read
 
@@ -138,3 +138,29 @@ def test_pattern_keeps_inline_ff_args(tune_path):
     # byte is $FF inside a pattern; that pattern must be longer than the
     # bytes up to that $FF.
     assert any(constants.PATTERN_END in pat.data for pat in song.patterns) or True
+
+
+def test_tempo_reload_is_the_play_entry_bmi_target(tune_path):
+    """The reload is the ``LDA #n; STA tempo`` the play entry's BMI reaches."""
+    song = reader.read(tune_path)
+    image = bytearray(song.image)
+    at = bytes(image).index(bytes((0xA2, 0x00, 0xCE))) + 7 + 0x0C
+
+    def reload():
+        view = reader.load_view(bytes(image), song.load_addr)
+        return reader.find_tempo_reload(view, song.load_addr, len(image))
+
+    assert image[at] == 0xA9 and reload() == image[at + 1]
+    image[at + 1] = 7
+    assert reload() == 7
+    image[at + 3] ^= 1
+    assert reload() is None
+    image[at + 3] ^= 1
+    image[at] = 0xEA
+    assert reload() is None
+
+
+def test_tempo_reload_needs_a_standard_play_entry():
+    """No play entry at a standard base means no reload."""
+    view = reader.load_view(bytes(0x100), 0x1000)
+    assert reader.find_tempo_reload(view, 0x1000, 0x100) is None
