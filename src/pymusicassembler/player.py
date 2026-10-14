@@ -3,11 +3,14 @@
 The tune's own init runs in the 6502 emulator (selecting the subtune and
 placing any relocated data); the play call is then modelled in Python on the
 player's work cells, at the addresses :mod:`pymusicassembler.layout` finds.
+
+The start-up memory is the shared libsidplayfp power-on image
+(:func:`pysidtracker.power_on_ram`), inherited from :class:`MemPlayer`, so a
+record read past the end of the image sees what the C64 RAM held at power-on.
 """
 
 from typing import List, Optional
 
-import numpy as np
 from pysidtracker import MemPlayer, run_to_rts, wire_mpu
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
 from pysidtracker.registers import PW_HI_REGS, RES_FILT, SR
@@ -17,21 +20,6 @@ from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.model import Song
 
 MAX_CYCLES = 8_000_000
-IO = slice(0xD000, 0xE000)
-DRIVER_CLEARED = slice(0x0000, 0x03FF)
-
-
-def power_on_ram() -> bytes:
-    """libsidplayfp's RAM before a tune loads.
-
-    Per 16K bank ``$00``/``$FF`` with 4-byte runs of the other value at offsets
-    2-5 of every 8 (banks 1 and 3 inverted); the PSID driver zeroes ``$0000-$03FE``.
-    """
-    addr = np.arange(0x10000)
-    run = (addr & 7 >= 2) & (addr & 7 < 6)
-    ram = np.where(run ^ ((addr >> 14) & 1).astype(bool), 0xFF, 0).astype(np.uint8)
-    ram[DRIVER_CLEARED] = 0
-    return ram.tobytes()
 
 
 class Player(MemPlayer):
@@ -85,11 +73,8 @@ class Player(MemPlayer):
 
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
-        ram = bytearray(power_on_ram())
-        ram[IO] = self._mem[IO]
-        end = self._load + len(self._song.image)
-        ram[self._load : end] = self._mem[self._load : end]
-        self._mem[:] = ram
+        # self._mem is already the shared power-on start-up image with the tune
+        # loaded (MemPlayer), so a record read past the image sees power-on RAM.
         self._mpu, self._bus = wire_mpu(self._mem)
         run_to_rts(self._mpu, self._bus, self._song.init_addr, subtune, MAX_CYCLES)
         self._entries = {m.addr for m in layout.play_entries(self._mem)}
