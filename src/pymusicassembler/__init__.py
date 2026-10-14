@@ -3,6 +3,7 @@
 from pymusicassembler.audio import render_samples, render_wav, write_wav
 from pymusicassembler.errors import (
     MusicAssemblerError,
+    MusicAssemblerParseError,
     SidParseError,
     SongValidationError,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "Instrument",
     "InstrumentEvent",
     "MusicAssemblerError",
+    "MusicAssemblerParseError",
     "MusicAssemblerSidParser",
     "NoteEvent",
     "OrderEntry",

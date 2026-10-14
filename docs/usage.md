@@ -55,4 +55,5 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 - Model: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`, and the
   decoded pattern events `NoteEvent` / `InstrumentEvent` / `DurationEvent`
   (`Pattern.events()`).
-- Errors: `MusicAssemblerError`, `SidParseError`, `SongValidationError`.
+- Errors: `MusicAssemblerError`, `MusicAssemblerParseError` (a
+  `pysidtracker.SidParseError`; alias `SidParseError`), `SongValidationError`.

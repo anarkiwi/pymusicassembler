@@ -15,8 +15,8 @@ against the [`sidtrace`](https://github.com/anarkiwi/sidtrace) oracle — a patc
    The CSV is cached per tune (`.oracle-cache/csv`).
 3. **Frame** the CSV into a per-frame 25-register grid; the cadence is the
    median interrupt-raise interval taken from the CSV itself.
-4. **Compare** `Player(read(data)).render_grid(...)` against the oracle grid,
-   aligning over the player's one leading silent play call (`max_lead`).
+4. **Compare** `oracle_hvsc.render(data, 1, ...)` (the survey renderer) against
+   the oracle grid, aligning over the player's one leading silent play call (`max_lead`).
 
 The tests are marked `oracle` and excluded from the default suite (they need
 Docker + network); a dedicated CI job runs `pytest -m oracle -n auto`. They are
@@ -28,6 +28,35 @@ instead of masking a regression.
 One representative HVSC tune per supported player variation (standard `$1021`
 PSID, image-loads-at-base, relocated player, native self-start song), all
 byte-exact. See the table in [format.md](format.md#byte-exact-verdict).
+
+## HVSC oracle survey
+
+[`scripts/oracle_hvsc.py`](../scripts/oracle_hvsc.py) plugs `Player` into the
+[`pysidtracker.survey`](https://github.com/anarkiwi/pysidtracker/blob/main/docs/survey.md)
+whole-song comparison against the `sidtrace` oracle (Docker), over every subtune
+of every HVSC tune SIDId names `Music_Assembler` or `(Music_Assembler/MC)`
+(`PLAYER`). The `-m oracle` test renders through the same function. Its `info`
+reports the decoded build: `load_offset` (image load address minus the player
+base: `0`, or `33` for a rip starting at the play routine), `relocated` (base
+other than `$1000`), `tempo` (the play-call divider reload immediate), `rsid`,
+and the play `trigger` and `speed` (calls per PAL frame, from
+`pysidtracker.playroutine_cadence`). The first three are `None` when the player
+base is not found. A tune the reader cannot decode raises
+`MusicAssemblerParseError` (a `pysidtracker.SidParseError`), which the survey
+records as `not_decompiled`.
+
+```bash
+pip install "pysidtracker[survey]>=0.12.0"
+python -m pysidtracker.survey find $HVSC --player '^\(?music_assembler(/mc)?\)?$' --out .hvsc-survey/tunes.csv
+PYTHONPATH=scripts python -m pysidtracker.survey run $HVSC .hvsc-survey/tunes.csv \
+    --work .hvsc-survey --render oracle_hvsc:render --jobs 16
+python -m pysidtracker.survey report .hvsc-survey/results.csv
+python -m pysidtracker.survey triage .hvsc-survey
+PYTHONPATH=scripts python -m pysidtracker.survey diff $HVSC .hvsc-survey/tunes.csv <md5>_<song> \
+    --work .hvsc-survey --render oracle_hvsc:render
+```
+
+`.hvsc-survey/` holds copyright-derived traces and is gitignored.
 
 ## Running locally
 

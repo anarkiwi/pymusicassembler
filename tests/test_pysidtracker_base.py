@@ -4,6 +4,7 @@ import pysidtracker
 
 from pymusicassembler.errors import (
     MusicAssemblerError,
+    MusicAssemblerParseError,
     SidParseError,
     SongValidationError,
 )
@@ -15,6 +16,14 @@ def test_errors_subclass_pysidtracker_sid_error():
     assert issubclass(MusicAssemblerError, pysidtracker.SidError)
     assert issubclass(SidParseError, pysidtracker.SidError)
     assert issubclass(SongValidationError, pysidtracker.SidError)
+
+
+def test_parse_error_is_pysidtracker_sid_parse_error():
+    """Decode failures are pysidtracker.SidParseError; the old name is an alias."""
+    assert SidParseError is MusicAssemblerParseError
+    assert issubclass(MusicAssemblerParseError, pysidtracker.SidParseError)
+    assert issubclass(MusicAssemblerParseError, MusicAssemblerError)
+    assert not issubclass(SongValidationError, pysidtracker.SidParseError)
 
 
 def test_parser_read_matches_parse(tune_path):

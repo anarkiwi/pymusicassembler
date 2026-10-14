@@ -10,7 +10,7 @@ table-loading instruction by its opcode skeleton (a relocation-invariant
 signature) and reads the base from its operand, then follows the bases to
 extract the orderlists, patterns, instruments and note-frequency tables.
 An unsupported player variant (no signature match, or a base outside the
-loaded image) raises :class:`SidParseError` rather than yielding garbage.
+loaded image) raises :class:`MusicAssemblerParseError` rather than yielding garbage.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -27,7 +27,7 @@ from pysidtracker import (
 )
 
 from pymusicassembler import constants
-from pymusicassembler.errors import SidParseError
+from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.model import (
     Instrument,
     OrderEntry,
@@ -51,7 +51,7 @@ def _parse_container(
     try:
         img = SidImage.from_bytes(data)
     except SidError as exc:  # normalise to this package's parse error
-        raise SidParseError(str(exc)) from exc
+        raise MusicAssemblerParseError(str(exc)) from exc
     header = img.header
     load = img.load
     if header is not None:
@@ -127,7 +127,7 @@ def _match_signatures(
 def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     """Discover per-tune table base addresses from player-code operands.
 
-    Raises :class:`SidParseError` when the player-code signatures are
+    Raises :class:`MusicAssemblerParseError` when the player-code signatures are
     absent (an unsupported Music Assembler variant) or when a discovered
     base falls outside the loaded image (a spurious match).
     """
@@ -141,7 +141,7 @@ def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     )
     if not all((order, pattern, instr, freq)):
         missing = ",".join(name for name, match in sig.items() if match is None)
-        raise SidParseError(
+        raise MusicAssemblerParseError(
             f"player signatures not found ({missing}); unsupported variant"
         )
     bases = {
@@ -155,7 +155,7 @@ def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     }
     for name, base in bases.items():
         if not load <= base < end:
-            raise SidParseError(
+            raise MusicAssemblerParseError(
                 f"discovered {name} base {base:#06x} outside image "
                 f"[{load:#06x},{end:#06x}); unsupported variant"
             )
@@ -200,7 +200,7 @@ def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
         ctl = img.peek(addr + cur + 1)
         entries.append(OrderEntry.from_bytes(pid, ctl))
     # No terminator within the bound: a wrong base or unsupported variant.
-    raise SidParseError(
+    raise MusicAssemblerParseError(
         f"orderlist for voice {voice} at {addr:#06x} has no terminator "
         f"within {constants.ORDER_MAX_BYTES} bytes; unsupported variant"
     )
@@ -331,7 +331,7 @@ class MusicAssemblerSidParser(BaseSidParser):
     ``PlayroutineKind.DIRECT`` (and packed/relocating variants once init runs).
     """
 
-    error_class = SidParseError
+    error_class = MusicAssemblerParseError
 
     def parse(self, data: bytes, **kwargs) -> Song:
         return parse(data)

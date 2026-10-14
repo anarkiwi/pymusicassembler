@@ -226,3 +226,6 @@ tests/.tunecache/
 # Oracle comparison cache: fetched HVSC .sid + sidtrace CSV traces (derived
 # from copyright tunes) -- regenerated in CI via Docker, never committed.
 .oracle-cache/
+
+# Whole-HVSC survey work dir (copyright-derived traces).
+.hvsc-survey/
