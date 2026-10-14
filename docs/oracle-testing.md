@@ -67,8 +67,9 @@ Helpers for working through a survey:
 - `scripts/layout_census.py HVSC tunes.csv` tallies which player builds
   `pymusicassembler.layout` finds, statically and after init.
 - the shared `pysidtracker disasm TUNE.sid [START [END]]` command
-  (`pysidtracker.disasm`) disassembles a tune image, with the tune's init
-  labelled and `--after-init` the image state after init.
+  (`pysidtracker.disasm`, pysidtracker >= 0.15) disassembles a tune image, the
+  tune's init/play entries labelled and `--after-init` the image state after
+  init.
 
 ## Running locally
 
