@@ -25,6 +25,19 @@ import fetch_tunes  # noqa: E402  (after sys.path tweak)
 tune_id, tune_path = make_tune_fixtures(fetch_tunes.TUNES, fetch_tunes.CACHE)
 
 
+def _fetch_or_skip(relpath):
+    try:
+        return fetch_tunes.fetch(relpath)
+    except Exception as exc:  # pylint: disable=broad-except
+        pytest.skip(f"tune unavailable: {exc}")
+
+
+@pytest.fixture
+def later_tune_path():
+    """A later-build tune (see ``fetch_tunes.LATER_TUNE``)."""
+    return _fetch_or_skip(fetch_tunes.LATER_TUNE)
+
+
 @pytest.fixture
 def native_tune_path():
     """A tune whose image is a native self-start song (see fetch_tunes).
@@ -32,7 +45,4 @@ def native_tune_path():
     Fetched on demand into the gitignored cache; skipped when unavailable
     offline, mirroring the shared ``tune_path`` fixture.
     """
-    try:
-        return fetch_tunes.fetch(fetch_tunes.NATIVE_TUNE)
-    except Exception as exc:  # pylint: disable=broad-except
-        pytest.skip(f"native tune unavailable: {exc}")
+    return _fetch_or_skip(fetch_tunes.NATIVE_TUNE)

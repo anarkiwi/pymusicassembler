@@ -55,6 +55,9 @@ TUNES = {
 # the shared standard-layout tests still parametrize only over $1021 tunes.
 NATIVE_TUNE = "DEMOS/A-F/Barbara.sid"
 
+# A later build (init before play; orderlist $FC/$FD and wave-program $FD).
+LATER_TUNE = "MUSICIANS/C/Cooper/Song.sid"
+
 
 def fetch(relpath: str, *, force: bool = False) -> Path:
     """Fetch ``relpath`` from the HVSC mirror into the cache; return its path."""

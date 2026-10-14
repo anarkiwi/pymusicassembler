@@ -8,10 +8,10 @@ export to the native Music Assembler editor song format (the `S.` files the
 Triad v1.4 editor loads).
 
 Consumes `.sid` files (PSID/RSID containers) and bare `.prg` images through the
-shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) base: the
-player binary is identical across tunes, so each table base is discovered from
-the player code's 16-bit operands (relocation-safe) and packed/relocating builds
-are detected by running init — container headers are not trusted.
+shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) base: every
+work cell and table of the player is located from the player code's own operands
+(any load address and player build), and the tune's init runs in a 6502
+emulator, so subtune selection and packed/relocating rips play as on a C64.
 
 ## Install
 

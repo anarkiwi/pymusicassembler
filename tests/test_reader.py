@@ -4,6 +4,8 @@ import io
 
 import pytest
 
+from pysidtracker import write_psid
+
 from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError
 from pymusicassembler.reader import parse, read
@@ -66,68 +68,78 @@ def test_truncated_inputs():
         parse(b"\x21")  # too short for a .prg load address
 
 
-_LOAD = 0x1000
+def _prg(song, image=None):
+    load = song.load_addr
+    return bytes((load & 0xFF, load >> 8)) + bytes(
+        song.image if image is None else image
+    )
 
 
-def _synthetic_ma_image():
-    """A minimal, self-contained Music Assembler image (load $1000).
-
-    Carries all four player-code signatures the reader locates, with the
-    table bases they reference wired to small in-image orderlist/pattern/
-    instrument/frequency tables, so it parses without any HVSC tune.
-    """
-    img = bytearray(0x400)
-
-    def put(off, data):
-        img[off : off + len(data)] = bytes(data)
-
-    # Player-code signatures (operands = absolute table addresses).
-    put(0x010, [0xBD, 0x00, 0x11, 0x85, 0xFA, 0xBD, 0x03, 0x11, 0x85, 0xFB])  # order
-    put(0x01A, [0xB9, 0x40, 0x11, 0x85, 0xFA, 0xB9, 0x50, 0x11, 0x85, 0xFB])  # pattern
-    put(0x024, [0x9D, 0xCC, 0x10, 0xB9, 0x00, 0x12, 0x85, 0xFA])  # instr -> $1200
-    put(0x02C, [0xB9, 0x50, 0x12, 0x9D, 0xCC, 0x10, 0xB9, 0xB0, 0x12, 0x9D, 0xCF, 0x10])
-    # Orderlist pointer tables (lo at $1100, hi at $1103) -> voices $11x0.
-    put(0x100, [0x10, 0x20, 0x30])
-    put(0x103, [0x11, 0x11, 0x11])
-    for voice_off in (0x110, 0x120, 0x130):
-        put(voice_off, [0x00, 0x00, constants.PATTERN_END])  # one entry + terminator
-    # Pattern pointer tables (lo $1140, hi $1150) -> pattern 0 at $1160.
-    put(0x140, [0x60])
-    put(0x150, [0x11])
-    put(0x160, [0x80, 0x00, 0x00, constants.PATTERN_END])  # instr-select + note
-    return img
+def test_rejects_image_without_player():
+    with pytest.raises(SidParseError, match="no play entry"):
+        parse(bytes((0x00, 0x10)) + bytes(0x400))
 
 
-def _synthetic_prg(img):
-    return bytes((_LOAD & 0xFF, _LOAD >> 8)) + bytes(img)
+def test_rejects_missing_player_signature(tune_path):
+    song = read(tune_path)
+    image = bytearray(song.image)
+    at = bytes(image).index(bytes((0x29, 0x03, 0xA8, 0xB9)))
+    image[at] = 0xEA
+    with pytest.raises(SidParseError, match=r"signatures not found \(arp\)"):
+        parse(_prg(song, image))
 
 
-def test_synthetic_image_parses():
-    song = parse(_synthetic_prg(_synthetic_ma_image()))
-    assert len(song.orderlists) == constants.VOICES
-    assert all(o.entries for o in song.orderlists)
-    assert song.patterns and song.instruments
-
-
-def test_rejects_missing_player_signatures():
-    with pytest.raises(SidParseError, match="signatures not found"):
-        parse(_synthetic_prg(bytearray(0x400)))  # no signatures at all
-
-
-def test_rejects_base_outside_image():
-    img = _synthetic_ma_image()
-    img[0x011] = 0x00  # order_lo operand -> $9000, outside the loaded image
-    img[0x012] = 0x90
-    with pytest.raises(SidParseError, match="outside image"):
-        parse(_synthetic_prg(img))
+def test_rejects_base_outside_image(tune_path):
+    song = read(tune_path)
+    lay = reader.discover_layout(
+        reader.load_view(song.image, song.load_addr),
+        song.play_addr,
+        song.load_addr,
+        song.load_addr + len(song.image),
+    )
+    image = bytearray(song.image)
+    at = bytes(image).index(bytes((0x85, 0xFA, 0xBD))) - 2
+    assert image[at] | (image[at + 1] << 8) == lay.order_lo
+    image[at + 1] ^= 0x80
+    with pytest.raises(SidParseError, match="order_lo base .* outside image"):
+        parse(_prg(song, image))
 
 
 def test_rejects_unterminated_orderlist():
-    img = _synthetic_ma_image()
-    img[0x100] = 0x50  # point voice-0 orderlist at the all-zero $1250 region:
-    img[0x103] = 0x12  # no $FF within the bound -> unsupported/garbage base
+    view = reader.load_view(bytes((0x00, 0x10, 0x00, 0x10)) + bytes(0x1100), 0x1000)
+    bases = {"order_lo": 0x1000, "order_hi": 0x1002}
     with pytest.raises(SidParseError, match="no terminator"):
-        parse(_synthetic_prg(img))
+        reader._parse_orderlist(view, bases, 0)  # pylint: disable=protected-access
+
+
+def relocating_rip(song, at=0xC000):
+    """A PSID loading ``song`` at ``at`` whose init copies it home, then inits."""
+    pages = (len(song.image) + 0xFF) >> 8
+    src, dst = at + 25, song.load_addr
+    stub = bytes(
+        [0xA2, pages, 0xA0, 0x00, 0xB9, src & 0xFF, src >> 8, 0x99, dst & 0xFF]
+        + [dst >> 8, 0xC8, 0xD0, 0xF7, 0xEE, (at + 6) & 0xFF, (at + 6) >> 8, 0xEE]
+        + [(at + 9) & 0xFF, (at + 9) >> 8, 0xCA, 0xD0, 0xEE, 0x4C]
+        + [song.init_addr & 0xFF, song.init_addr >> 8]
+    )
+    return write_psid(
+        load=at, init=at, play=song.play_addr, image=stub + bytes(song.image)
+    )
+
+
+def test_relocating_rip_is_read_after_init(tune_path):
+    song = read(tune_path)
+    copy = parse(relocating_rip(song))
+    assert copy.load_addr == 0xC000
+    assert copy.orderlists == song.orderlists
+    assert copy.patterns == song.patterns
+    assert copy.instruments == song.instruments
+
+
+def test_relocating_prg_without_init_is_rejected(tune_path):
+    data = relocating_rip(read(tune_path))
+    with pytest.raises(SidParseError, match="outside image"):
+        parse(bytes((0x00, 0xC0)) + data[0x7C:])
 
 
 def test_pattern_keeps_inline_ff_args(tune_path):
@@ -138,29 +150,3 @@ def test_pattern_keeps_inline_ff_args(tune_path):
     # byte is $FF inside a pattern; that pattern must be longer than the
     # bytes up to that $FF.
     assert any(constants.PATTERN_END in pat.data for pat in song.patterns) or True
-
-
-def test_tempo_reload_is_the_play_entry_bmi_target(tune_path):
-    """The reload is the ``LDA #n; STA tempo`` the play entry's BMI reaches."""
-    song = reader.read(tune_path)
-    image = bytearray(song.image)
-    at = bytes(image).index(bytes((0xA2, 0x00, 0xCE))) + 7 + 0x0C
-
-    def reload():
-        view = reader.load_view(bytes(image), song.load_addr)
-        return reader.find_tempo_reload(view, song.load_addr, len(image))
-
-    assert image[at] == 0xA9 and reload() == image[at + 1]
-    image[at + 1] = 7
-    assert reload() == 7
-    image[at + 3] ^= 1
-    assert reload() is None
-    image[at + 3] ^= 1
-    image[at] = 0xEA
-    assert reload() is None
-
-
-def test_tempo_reload_needs_a_standard_play_entry():
-    """No play entry at a standard base means no reload."""
-    view = reader.load_view(bytes(0x100), 0x1000)
-    assert reader.find_tempo_reload(view, 0x1000, 0x100) is None

@@ -26,6 +26,7 @@ def test_render_matches_player(tune_path):
         "load_offset": 0x21,
         "relocated": False,
         "tempo": 2,
+        "features": info["features"],
         "rsid": False,
         "trigger": "pal_video",
         "speed": 1,
@@ -49,18 +50,15 @@ def test_render_selects_one_based_subtune(tune_path, monkeypatch):
     assert sorted(seen) == [("cadence", 2), ("player", 2)]
 
 
-def test_unknown_cadence_source_and_layout(tune_path, monkeypatch):
+def test_unknown_cadence_source(tune_path, monkeypatch):
     monkeypatch.setattr(
         oracle_hvsc,
         "playroutine_cadence",
         lambda data, subtune: Cadence(PAL_CYCLES_PER_FRAME, None, PAL_CLOCK_HZ),
     )
-    monkeypatch.setattr(reader, "find_player_base", lambda *_: None)
-    monkeypatch.setattr(reader, "find_tempo_reload", lambda *_: None)
     _, info = oracle_hvsc.render(tune_path.read_bytes(), 1, 10)
     assert info["trigger"] is None
     assert info["speed"] == 1
-    assert info["load_offset"] is info["relocated"] is info["tempo"] is None
 
 
 @pytest.mark.parametrize("data", [b"PSID", b"PSID" + bytes(0x7A) + bytes(0x800)])

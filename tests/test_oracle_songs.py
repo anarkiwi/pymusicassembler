@@ -11,7 +11,7 @@ from pathlib import Path
 import oracle_hvsc
 import pytest
 
-from pysidtracker import make_oracle_fixtures
+from pysidtracker import SidImage, make_oracle_fixtures
 
 _CACHE = Path(os.environ.get("PYMUSICASSEMBLER_ORACLE_CACHE", ".oracle-cache"))
 _MAX_LEAD = 4
@@ -19,14 +19,27 @@ _MAX_LEAD = 4
 TUNES = {
     # Per-tune play-call divider reload (LDA #8 at the play entry's BMI target).
     "tempo_8": "MUSICIANS/G/Greatrix/VHD.sid",
+    # Later build: init before play, orderlist $FC/$FD and wave-program $FD.
+    "later_build": "MUSICIANS/C/Cooper/Song.sid",
+    # Orderlist $FD jump through the order-advance hook.
+    "order_jump": "MUSICIANS/A/Anakonda/Nightmare_Slide_Preview.sid",
+    # RES_FILT presets read from the player's own table.
+    "res_presets": "DEMOS/A-F/Bit_Shit.sid",
+    # Filter commands retarget the trigger-reset voice and its reset values.
+    "filter_sweep": "DEMOS/A-F/After8ty_01.sid",
+    # Default song 2: init selects the song from the accumulator.
+    "start_song": "MUSICIANS/T/The_Blue_Ninja/Holiday_Dream_91_Endpart.sid",
+    # One of several relocated player copies, placed by init.
+    "relocated_copy": "MUSICIANS/H/Hultink_Gerard/Kids.sid",
 }
 
-# The longest HVSC song length of TUNES, in seconds.
-SECONDS = 40
+# At least the longest HVSC song length of TUNES, in seconds.
+SECONDS = 101
 
 
 def _render(data, nframes):
-    return oracle_hvsc.render(data, 1, nframes + _MAX_LEAD)[0].tolist()
+    song = SidImage.from_bytes(data).header.start_song
+    return oracle_hvsc.render(data, song, nframes + _MAX_LEAD)[0].tolist()
 
 
 tune_id, oracle_match = make_oracle_fixtures(
