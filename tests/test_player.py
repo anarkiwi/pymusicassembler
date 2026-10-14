@@ -10,8 +10,9 @@ from dataclasses import replace
 
 import pytest
 
+from pysidtracker import power_on_ram
 from pymusicassembler import constants, reader
-from pymusicassembler.player import Player, iter_frames, power_on_ram, render_grid
+from pymusicassembler.player import Player, iter_frames, render_grid
 
 NREG = 25
 
