@@ -62,7 +62,8 @@ Three independent per-voice tracks:
   (`id = value & $1F`); `$A0–$FE` long duration; `$FF` terminator.
 - **Instruments** — 8-byte records: attack/decay, sustain/release, waveform,
   pulse-width init + sweep step, arp speed + step, porta/effect flags.
-- **Per-frame DSP** — tempo divider, 16-bit pulse-width sweep, vibrato/arp
+- **Per-frame DSP** — tempo divider (rows advance every `n+1` play calls, `n`
+  the per-tune `LDA #n` the play entry reloads it with), 16-bit pulse-width sweep, vibrato/arp
   frequency accumulators, the gate/retrigger idiom, and a self-modified
   filter-cutoff sweep.
 
@@ -109,6 +110,13 @@ supported player variation, each **byte-exact (residual 0)**:
 | Image loads at the player base (`load == base`) | Acid Mix | `$1000` / `$1000` |
 | Relocated player (`base != $1000`) | Corvus, Dr Doom, Kasza-Nota | `$2e00` / `$1200` / `$1500` |
 | Native self-start song wrapped in PSID (`$78` stub) | Eastern Promise | `$1b00` / `$1b00` |
+
+`tests/test_oracle_songs.py` renders one tune per player feature for its whole
+HVSC song length:
+
+| Feature | Tune |
+| --- | --- |
+| Per-tune tempo reload (`LDA #8`) | VHD (Greatrix) |
 
 All are single-speed. See [oracle-testing.md](oracle-testing.md) for how the
 oracle comparison works.

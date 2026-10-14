@@ -106,6 +106,9 @@ class Player(MemPlayer):
         view = reader.load_view(image, load)
         self._base = reader.find_player_base(view, load, len(image))
         self.tempo_reload = reader.find_tempo_reload(view, load, len(image))
+        self._tempo_reload = (
+            constants.TEMPO_DIVIDER if self.tempo_reload is None else self.tempo_reload
+        )
         # Work-RAM and self-modified filter immediates live at fixed offsets
         # from the player base; relocate the base-$1000 constants to the
         # discovered base (0 shift for the standard $1000 build).
@@ -225,7 +228,7 @@ class Player(MemPlayer):
         self._tempo = (self._tempo - 1) & 0xFF
         advance = self._tempo >= 0x80  # signed < 0
         if advance:
-            self._tempo = constants.TEMPO_DIVIDER
+            self._tempo = self._tempo_reload
         for v in range(constants.VOICES):
             voice = self._voices[v]
             if not advance:

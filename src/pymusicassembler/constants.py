@@ -68,7 +68,7 @@ INSTR_ARP_STEP = 6
 INSTR_PORTA = 7
 
 # Player constants recovered from the disassembly.
-TEMPO_DIVIDER = 2  # play-call divider ($1090 reset value)
+TEMPO_DIVIDER = 2  # editor-default play-call divider reload (``LDA #n; STA $1090``)
 FILTER_STEP = 0xF0  # cutoff sweep increment per owner frame ($129e += step)
 FILTER_CTR = 0x29  # cutoff sweep gate-counter reset ($1296)
 RES_PRESETS = (0xF1, 0xF7, 0xF7)  # per-voice RES_FILT preset ($12b3)

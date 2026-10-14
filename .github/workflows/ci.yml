@@ -68,13 +68,15 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .oracle-cache/hvsc
-          key: oracle-hvsc-${{ hashFiles('tests/test_oracle_hvsc.py') }}
+          key: oracle-hvsc-${{ hashFiles('tests/test_oracle_*.py') }}
           restore-keys: oracle-hvsc-
       - name: Cache oracle CSVs
         uses: actions/cache@v6
         with:
-          path: .oracle-cache/csv
-          key: oracle-csv-${{ steps.image.outputs.digest }}-${{ hashFiles('tests/test_oracle_hvsc.py') }}
+          path: |
+            .oracle-cache/csv
+            .oracle-cache/songs
+          key: oracle-csv-${{ steps.image.outputs.digest }}-${{ hashFiles('tests/test_oracle_*.py') }}
       - name: Oracle comparison (never skipped)
         run: pytest -m oracle -n auto
 
