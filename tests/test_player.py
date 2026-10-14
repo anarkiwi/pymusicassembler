@@ -70,3 +70,21 @@ def test_render_is_deterministic(tune_path, frames):
     """Two renders of the same song produce identical output."""
     song = reader.read(tune_path)
     assert render_grid(song, frames) == render_grid(song, frames)
+
+
+@pytest.mark.parametrize("reload", [0, 1, 4])
+def test_rows_advance_every_reload_plus_one_calls(tune_path, reload):
+    """The play entry reloads the divider from the image's ``LDA #n``."""
+    song = reader.read(tune_path)
+    image = bytearray(song.image)
+    at = bytes(image).index(bytes((0xA2, 0x00, 0xCE))) + 7 + 0x0C
+    image[at + 1] = reload
+    song.image = bytes(image)
+    player = Player(song)
+    assert player.tempo_reload == reload
+    underflows = []
+    for frame in range(12):
+        player.play_frame()
+        if player._tempo == reload:  # pylint: disable=protected-access
+            underflows.append(frame)
+    assert underflows == list(range(0, 12, reload + 1))

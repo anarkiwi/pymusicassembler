@@ -27,7 +27,8 @@ instead of masking a regression.
 
 One representative HVSC tune per supported player variation (standard `$1021`
 PSID, image-loads-at-base, relocated player, native self-start song), all
-byte-exact. See the table in [format.md](format.md#byte-exact-verdict).
+byte-exact over their first 250 frames, plus one tune per player feature over
+its whole song (`tests/test_oracle_songs.py`). See the table in [format.md](format.md#byte-exact-verdict).
 
 ## HVSC oracle survey
 
@@ -46,7 +47,7 @@ reader cannot decode raises `MusicAssemblerParseError` (a
 `pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
 ```bash
-pip install "pysidtracker[survey]>=0.12.0"
+pip install "pysidtracker[survey]>=0.13.0"
 python -m pysidtracker.survey find $HVSC --player '^\(?music_assembler(/mc)?\)?$' --out .hvsc-survey/tunes.csv
 PYTHONPATH=scripts python -m pysidtracker.survey run $HVSC .hvsc-survey/tunes.csv \
     --work .hvsc-survey --render oracle_hvsc:render --jobs 16
