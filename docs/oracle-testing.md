@@ -66,7 +66,9 @@ Helpers for working through a survey:
   for a quick `survey run`; `--tally RESULTS` reports exact/total per class.
 - `scripts/layout_census.py HVSC tunes.csv` tallies which player builds
   `pymusicassembler.layout` finds, statically and after init.
-- `scripts/disasm.py TUNE.sid [START [END]]` disassembles a tune image.
+- the shared `pysidtracker disasm TUNE.sid [START [END]]` command
+  (`pysidtracker.disasm`) disassembles a tune image, with the tune's init
+  labelled and `--after-init` the image state after init.
 
 ## Running locally
 
