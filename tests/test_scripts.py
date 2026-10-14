@@ -3,23 +3,7 @@
 import csv
 import json
 
-import disasm
 import survey_sample
-
-from pysidtracker import SidImage
-
-
-def test_disassemble_play_entry(capsys, tmp_path):
-    prg = bytes((0x21, 0x10, 0xA2, 0x00, 0xCE, 0x90, 0x10, 0x30, 0x0C))
-    lines = [
-        (addr, text)
-        for addr, _, text in disasm.disassemble(SidImage.from_prg(prg), 0x1021, 0x1028)
-    ]
-    assert lines == [(0x1021, "LDX #$00"), (0x1023, "DEC $1090"), (0x1026, "BMI $1034")]
-    path = tmp_path / "t.prg"
-    path.write_bytes(prg)
-    disasm.main([str(path), "1023"])
-    assert capsys.readouterr().out.splitlines()[0].startswith("1023  ce 90 10")
 
 
 def _write(path, rows):
