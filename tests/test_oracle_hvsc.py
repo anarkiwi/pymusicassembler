@@ -28,12 +28,10 @@ aligns over via ``max_lead``.
 import os
 from pathlib import Path
 
+import oracle_hvsc
 import pytest
 
 from pysidtracker import make_oracle_fixtures
-
-from pymusicassembler.player import Player
-from pymusicassembler.reader import read
 
 # Cache under the workspace (a Docker-daemon-visible path, and what CI persists
 # via actions/cache). ``$PYMUSICASSEMBLER_ORACLE_CACHE`` overrides the location.
@@ -60,7 +58,7 @@ TUNES = {
 
 
 def _render(data, nframes):
-    return Player(read(data)).render_grid(nframes + _MAX_LEAD)
+    return oracle_hvsc.render(data, 1, nframes + _MAX_LEAD)[0].tolist()
 
 
 tune_id, oracle_match = make_oracle_fixtures(

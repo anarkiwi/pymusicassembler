@@ -100,11 +100,12 @@ class Player(MemPlayer):
     """
 
     # pylint: disable=too-many-instance-attributes  # full player machine state
-    def __init__(self, song: Song):
+    def __init__(self, song: Song, subtune: int = 0):
         image = song.image
         load = song.load_addr
         view = reader.load_view(image, load)
         self._base = reader.find_player_base(view, load, len(image))
+        self.tempo_reload = reader.find_tempo_reload(view, load, len(image))
         # Work-RAM and self-modified filter immediates live at fixed offsets
         # from the player base; relocate the base-$1000 constants to the
         # discovered base (0 shift for the standard $1000 build).
@@ -118,7 +119,12 @@ class Player(MemPlayer):
         self._fc_step = 0  # $12a0 sweep step (self-modified ADC immediate)
         self._fc_acc_reset = 0  # $1266 voice-0 trigger reset (per-tune immediate)
         self._fc_ctr_reset = 0  # $126b voice-0 trigger reset (per-tune immediate)
-        super().__init__(image, load)
+        super().__init__(image, load, subtune)
+
+    @property
+    def base(self) -> Optional[int]:
+        """Discovered player base address, or ``None`` for a non-standard layout."""
+        return self._base
 
     # -- raw image / work-RAM access ------------------------------------
     def _work(self, addr: int, index: int = 0) -> int:

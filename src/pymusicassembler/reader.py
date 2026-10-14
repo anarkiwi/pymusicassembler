@@ -10,7 +10,7 @@ table-loading instruction by its opcode skeleton (a relocation-invariant
 signature) and reads the base from its operand, then follows the bases to
 extract the orderlists, patterns, instruments and note-frequency tables.
 An unsupported player variant (no signature match, or a base outside the
-loaded image) raises :class:`SidParseError` rather than yielding garbage.
+loaded image) raises :class:`MusicAssemblerParseError` rather than yielding garbage.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -27,7 +27,7 @@ from pysidtracker import (
 )
 
 from pymusicassembler import constants
-from pymusicassembler.errors import SidParseError
+from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.model import (
     Instrument,
     OrderEntry,
@@ -51,7 +51,7 @@ def _parse_container(
     try:
         img = SidImage.from_bytes(data)
     except SidError as exc:  # normalise to this package's parse error
-        raise SidParseError(str(exc)) from exc
+        raise MusicAssemblerParseError(str(exc)) from exc
     header = img.header
     load = img.load
     if header is not None:
@@ -92,6 +92,8 @@ _PAT_FREQ = CodePattern(
 # base independent of relocation (used to emit the native self-starting
 # format at ``base``, where the play routine sits at base+$21).
 _PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
+_PLAY_BMI_END = 7
+_PAT_RELOAD = CodePattern("A9 {reload:b} 8D {tempo:w}")
 
 
 def _find_freq(image: SidImage, start: int, end: int) -> Optional[Match]:
@@ -127,7 +129,7 @@ def _match_signatures(
 def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     """Discover per-tune table base addresses from player-code operands.
 
-    Raises :class:`SidParseError` when the player-code signatures are
+    Raises :class:`MusicAssemblerParseError` when the player-code signatures are
     absent (an unsupported Music Assembler variant) or when a discovered
     base falls outside the loaded image (a spurious match).
     """
@@ -141,7 +143,7 @@ def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     )
     if not all((order, pattern, instr, freq)):
         missing = ",".join(name for name, match in sig.items() if match is None)
-        raise SidParseError(
+        raise MusicAssemblerParseError(
             f"player signatures not found ({missing}); unsupported variant"
         )
     bases = {
@@ -155,7 +157,7 @@ def discover_bases(image: SidImage, load: int, image_len: int) -> dict:
     }
     for name, base in bases.items():
         if not load <= base < end:
-            raise SidParseError(
+            raise MusicAssemblerParseError(
                 f"discovered {name} base {base:#06x} outside image "
                 f"[{load:#06x},{end:#06x}); unsupported variant"
             )
@@ -171,23 +173,42 @@ def load_view(image: bytes, load: int) -> SidImage:
     return SidImage.from_prg(bytes((load & 0xFF, load >> 8)) + image)
 
 
-def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int]:
-    """Locate the player base address, or ``None`` if the layout is
-    non-standard.
+def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
+    """The ``LDX #0; DEC tempo`` play entry (:data:`_PAT_PLAY`) at a standard base.
 
-    The play routine's tempo-prescaler cell is ``base + 0x90``, found from
-    the ``LDX #0; DEC tempo`` play entry (:data:`_PAT_PLAY`).  A genuine
-    Music Assembler image loads either at ``base`` (the self-start stub /
-    PSID vectors precede the play routine) or at ``base + 0x21`` (a rip
-    that begins at the play routine itself); any other offset means the
-    player is not at the standard base+$21 entry, so the base is rejected.
+    The tempo-prescaler cell is ``base + $90``; a genuine image loads at ``base``
+    or ``base + $21``, so a match placing the base elsewhere is rejected.
     """
     end = load + image_len
     for match in find_code_all(image, _PAT_PLAY, start=load, end=end):
         base = match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
         if load - base in (0, constants.NATIVE_PLAY_OFFSET):
-            return base
+            return match
     return None
+
+
+def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int]:
+    """Locate the player base address, or ``None`` if the layout is non-standard."""
+    match = _play_entry(image, load, image_len)
+    if match is None:
+        return None
+    return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
+
+
+def find_tempo_reload(image: SidImage, load: int, image_len: int) -> Optional[int]:
+    """The play entry's tempo-divider reload immediate, or ``None`` if absent.
+
+    The entry's ``BMI`` branches to ``LDA #n; STA tempo`` when the divider
+    underflows; ``n`` is the per-tune reload.
+    """
+    match = _play_entry(image, load, image_len)
+    if match is None:
+        return None
+    target = match.addr + _PLAY_BMI_END + image.peek(match.addr + _PLAY_BMI_END - 1)
+    reload = find_code_first(image, _PAT_RELOAD, start=target, end=target + 5)
+    if reload is None or reload.captures["tempo"] != match.captures["tempo"]:
+        return None
+    return reload.captures["reload"]
 
 
 def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
@@ -200,7 +221,7 @@ def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
         ctl = img.peek(addr + cur + 1)
         entries.append(OrderEntry.from_bytes(pid, ctl))
     # No terminator within the bound: a wrong base or unsupported variant.
-    raise SidParseError(
+    raise MusicAssemblerParseError(
         f"orderlist for voice {voice} at {addr:#06x} has no terminator "
         f"within {constants.ORDER_MAX_BYTES} bytes; unsupported variant"
     )
@@ -331,7 +352,7 @@ class MusicAssemblerSidParser(BaseSidParser):
     ``PlayroutineKind.DIRECT`` (and packed/relocating variants once init runs).
     """
 
-    error_class = SidParseError
+    error_class = MusicAssemblerParseError
 
     def parse(self, data: bytes, **kwargs) -> Song:
         return parse(data)

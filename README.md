@@ -35,7 +35,8 @@ for writes in ma.iter_frames(song, max_frames=50 * 60):
 See [docs/usage.md](docs/usage.md) for editing/write-back, the register grid,
 register logs, WAV rendering, the CLI, and the full public API, and
 [docs/format.md](docs/format.md) for the format, playroutine, and byte-exact
-validation.
+validation, and [docs/oracle-testing.md](docs/oracle-testing.md) for the oracle
+tests and the whole-HVSC survey.
 
 ## Development
 

@@ -1,11 +1,16 @@
-"""Exceptions raised by pymusicassembler."""
+"""Exceptions for pymusicassembler, built by :func:`pysidtracker.make_package_errors`.
+
+``MusicAssemblerParseError`` subclasses both ``MusicAssemblerError`` and
+:class:`pysidtracker.SidParseError` ("not a decodable Music Assembler tune");
+``SidParseError`` is kept as its backward-compatible alias.
+"""
 
 from pysidtracker import make_package_errors
 
-# ``SidParseError`` subclasses BOTH the package root and the base
-# ``pysidtracker.SidParseError`` (via ``make_package_errors``), so a base
-# ``except SidParseError`` catches a Music Assembler parse error too.
-MusicAssemblerError, SidParseError, _FormatError = make_package_errors("MusicAssembler")
+MusicAssemblerError, MusicAssemblerParseError, _FormatError = make_package_errors(
+    "MusicAssembler"
+)
+SidParseError = MusicAssemblerParseError
 
 
 class SongValidationError(MusicAssemblerError):
