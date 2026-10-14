@@ -12,7 +12,6 @@ SPACE = {
     "tempo": 0x1090,
     "tempo_reload": 0x1035,
     "init": 0x1048,
-    "clear": 0x1081,
     "order_lo": 0x14B9,
     "order_hi": 0x14BC,
     "pattern_lo": 0x1532,
@@ -29,6 +28,17 @@ SPACE = {
     "fc_acc": 0x129E,
     "fc_ctr": 0x1296,
     "fc_step": 0x12A0,
+    "trigger_owner": 0x1262,
+    "trigger_acc": 0x1266,
+    "trigger_ctr": 0x126B,
+    "sweep_owner": 0x1262,
+    "sweep_ctr": 0x1296,
+    "sweep_dec": 0x1296,
+    "sweep_acc": 0x129E,
+    "sweep_step": 0x12A0,
+    "sweep_sta": 0x129E,
+    "program_acc": 0x129E,
+    "sid": 0xD400,
     "res_presets": 0x12B3,
     "voice_reg": 0x10C6,
     "arp": 0x12C3,
@@ -85,6 +95,7 @@ ENTRY = (0xA2, 0x00, 0xCE, 0x90, 0x10, 0x30, 0x0C)
         (0, 0x1021),
         (0x3000, 0x3021),
         (0x2030, 0x3021),
+        (0x2040, 0x1021),
     ],
 )
 def test_resolve_entry_walks_play_routines(play, expected):
@@ -96,6 +107,8 @@ def test_resolve_entry_walks_play_routines(play, expected):
             0x2010: (0xA9, 0x35, 0x85, 0x01, 0x20, 0x21, 0x10, 0x60),
             0x2020: (0x20, 0x00, 0x40, 0x4C, 0x21, 0x10),
             0x2030: (0x4C, 0x30, 0x20),
+            0x2040: (0x20, 0x50, 0x20, 0x60),
+            0x2050: (0xEA, 0x4C, 0x21, 0x10),
             0x3000: (0x60,),
             0x0314: (0x10, 0x20),
         }
@@ -111,11 +124,11 @@ def test_discover_needs_entry_and_reload(tune_path):
     song = reader.read(tune_path)
     view = reader.load_view(song.image, song.load_addr)
     entry = layout.resolve_entry(view, song.play_addr)
-    with pytest.raises(MusicAssemblerParseError, match="no play entry"):
+    with pytest.raises(MusicAssemblerParseError, match=r"\(entry at"):
         layout.discover(view, entry + 1)
     image = bytearray(song.image)
     image[entry + 0x13 - song.load_addr] = 0xEA
-    with pytest.raises(MusicAssemblerParseError, match="no tempo reload"):
+    with pytest.raises(MusicAssemblerParseError, match=r"\(to_reload at"):
         layout.discover(reader.load_view(bytes(image), song.load_addr), entry)
 
 
@@ -127,3 +140,26 @@ def test_discover_rejects_unknown_pitch_branch(tune_path):
     view = reader.load_view(bytes(image), song.load_addr)
     with pytest.raises(MusicAssemblerParseError, match="pitch_skip"):
         layout.discover(view, layout.resolve_entry(view, song.play_addr))
+
+
+def test_routines_are_found_where_control_flow_leads(tune_path):
+    """A closer copy of a routine with other operands is not mistaken for it."""
+    song = reader.read(tune_path)
+    mem = bytearray(Player(song).memory)
+    lay = layout.discover(mem, Player(song).layout.entry)
+    tick = mem.index(bytes((0xA8, 0xB9, lay.inner_lo & 0xFF, lay.inner_lo >> 8)))
+    decoy = song.load_addr - 0x40
+    mem[decoy : decoy + 0x30] = mem[tick : tick + 0x30]
+    mem[decoy + 2] ^= 0x55
+    assert layout.discover(mem, lay.entry) == lay
+
+
+def test_routines_are_followed_through_jmp_trampolines(tune_path):
+    song = reader.read(tune_path)
+    mem = bytearray(Player(song).memory)
+    lay = layout.discover(mem, Player(song).layout.entry)
+    call = lay.tempo_reload + 5
+    advance = mem[call] | (mem[call + 1] << 8)
+    mem[0xF000:0xF006] = bytes((0x4C, 0x03, 0xF0, 0x4C, advance & 0xFF, advance >> 8))
+    mem[call : call + 2] = bytes((0x00, 0xF0))
+    assert layout.discover(mem, lay.entry) == lay

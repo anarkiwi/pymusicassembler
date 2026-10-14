@@ -8,7 +8,8 @@ Table bases come from the player code's own operands (see
 from typing import List, Optional, Tuple
 
 from pysidtracker import (
-    MEM_SIZE,
+    PSID_MAGIC,
+    RSID_MAGIC,
     BaseSidParser,
     CodePattern,
     Match,
@@ -16,11 +17,11 @@ from pysidtracker import (
     SidImage,
     find_code_all,
     read_bytes,
-    run_init,
 )
 
 from pymusicassembler import constants, layout
 from pymusicassembler.errors import MusicAssemblerParseError
+from pymusicassembler.player import Player
 from pymusicassembler.model import (
     Instrument,
     OrderEntry,
@@ -130,7 +131,13 @@ def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int
     return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
 
 
-def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
+def _parse_orderlist(
+    img: SidImage, bases: dict, voice: int, jump: Optional[int] = None
+) -> Orderlist:
+    """Voice ``voice``'s orderlist up to ``$FF``, a ``jump`` or the silence pattern.
+
+    The player never advances past a silence entry, so nothing after it plays.
+    """
     addr = img.ptr(bases["order_lo"], bases["order_hi"], voice)
     entries: List[OrderEntry] = []
     for cur in range(0, constants.ORDER_MAX_BYTES, 2):
@@ -139,6 +146,8 @@ def _parse_orderlist(img: SidImage, bases: dict, voice: int) -> Orderlist:
             return Orderlist(entries=entries)
         ctl = img.peek(addr + cur + 1)
         entries.append(OrderEntry.from_bytes(pid, ctl))
+        if pid in (jump, constants.SILENCE_PATTERN):
+            return Orderlist(entries=entries)
     # No terminator within the bound: a wrong base or unsupported variant.
     raise MusicAssemblerParseError(
         f"orderlist for voice {voice} at {addr:#06x} has no terminator "
@@ -210,18 +219,19 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
     return sorted(ids)
 
 
-def _locate(data: bytes, image: bytes, load: int, play: int):
-    """``(view, layout)``: the loaded image, else the image after emulated init."""
+def _locate(image: bytes, load: int, init: Optional[int], play: int):
+    """``(view, layout)``: the loaded image, else memory after the tune's init.
+
+    ``init`` ``None`` (a bare image) allows only the static view.
+    """
     img = load_view(image, load)
     try:
         return img, discover_layout(img, play, load, load + len(image))
-    except MusicAssemblerParseError as static_error:
-        try:
-            sid = SidImage.from_bytes(data)
-            run_init(sid)
-        except SidError:
-            raise static_error from None
-        return sid, discover_layout(sid, play, 0, MEM_SIZE)
+    except MusicAssemblerParseError:
+        if init is None:
+            raise
+    player = Player(Song(load_addr=load, init_addr=init, play_addr=play, image=image))
+    return load_view(player.memory, 0), player.layout
 
 
 def parse(data: bytes) -> Song:
@@ -231,15 +241,19 @@ def parse(data: bytes) -> Song:
     runs in the emulator (packed or relocating rips).
     """
     load, init, play, name, author, released, image, header = _parse_container(data)
-    img, lay = _locate(data, image, load, play)
-    if not header:
+    sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
+    img, lay = _locate(image, load, init if sid else None, play)
+    if not sid:
         init, play = lay.init, lay.entry
     bases = {name: getattr(lay, name) for name in _TABLES}
     commands = {constants.ORDER_TEMPO} if lay.order_tempo else set()
     commands |= {constants.ORDER_JUMP} if lay.order_jump else set()
 
     orderlists = [
-        _parse_orderlist(img, bases, voice) for voice in range(constants.VOICES)
+        _parse_orderlist(
+            img, bases, voice, constants.ORDER_JUMP if lay.order_jump else None
+        )
+        for voice in range(constants.VOICES)
     ]
 
     pattern_ids = _referenced_pattern_ids(orderlists, commands)

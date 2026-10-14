@@ -31,6 +31,16 @@ TUNES = {
     "start_song": "MUSICIANS/T/The_Blue_Ninja/Holiday_Dream_91_Endpart.sid",
     # One of several relocated player copies, placed by init.
     "relocated_copy": "MUSICIANS/H/Hultink_Gerard/Kids.sid",
+    # Pulse-width highs written with their upper nibble set.
+    "pw_hi_nibble": "MUSICIANS/R/Ramos/Variation.sid",
+    # A record read past the image sees libsidplayfp's power-up RAM.
+    "power_on_ram": "MUSICIANS/M/Merman/Triumph_original_mix.sid",
+    # An orderlist that parks a voice on the silence pattern, unterminated.
+    "silence_parked": "MUSICIANS/H/Harlequin/Evacuation.sid",
+    # The play routine self-modifies the JSR into its song's player copy.
+    "self_modified_call": "MUSICIANS/K/Kaiser_Cameron/Nether_preview.sid",
+    # Two player instances each frame, the second on a second SID.
+    "two_players": "MUSICIANS/J/JVD/Double_2SID.sid",
 }
 
 # At least the longest HVSC song length of TUNES, in seconds.

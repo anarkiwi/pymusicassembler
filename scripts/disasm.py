@@ -16,7 +16,7 @@ from pysidtracker import SidImage
 def disassemble(image: SidImage, start: int, end: int):
     """Yield ``(addr, bytes, text)`` for each instruction in ``[start, end)``."""
     mpu = MPU()
-    mpu.memory[image.load : image.end] = image.image
+    mpu.memory[:] = list(image.mem)
     dis = Disassembler(mpu)
     pc = start
     while pc < end:
