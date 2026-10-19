@@ -1,15 +1,19 @@
-"""Typed model: order entries, pattern grammar decoding, instruments."""
+"""Typed model: order entries, pattern grammar decoding, instruments, arpeggios."""
 
 import pytest
 
+from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerError
 from pymusicassembler.model import (
+    Arpeggio,
+    ArpeggioRow,
     DurationEvent,
     Instrument,
     InstrumentEvent,
     NoteEvent,
     OrderEntry,
     Pattern,
+    Song,
 )
 
 
@@ -83,3 +87,32 @@ def test_pattern_events_vibrato_args():
 def test_pattern_events_truncated_note():
     # a trailing lone note byte with no control byte decodes safely.
     assert Pattern(data=[0x10]).events() == [NoteEvent(0x10, 0)]
+
+
+def test_arpeggio_row_bytes():
+    row = ArpeggioRow(wave=0x21, note=0x03, filter=0x80)
+    assert row.to_bytes() == bytes((0x21, 0x03, 0x80))
+
+
+def test_arpeggio_restart_bytes():
+    arp = Arpeggio(rows=[ArpeggioRow(0x21, 3, 0), ArpeggioRow(0x21, 7, 0)])
+    assert arp.terminator == constants.PROGRAM_RESTART and arp.jump is None
+    assert arp.to_bytes() == bytes((0x21, 3, 0, 0x21, 7, 0, 0xFF))
+
+
+def test_arpeggio_stop_bytes():
+    arp = Arpeggio(rows=[ArpeggioRow(0x41, 0, 0)], terminator=constants.PROGRAM_STOP)
+    assert arp.to_bytes() == bytes((0x41, 0, 0, 0xFE))
+
+
+def test_arpeggio_jump_bytes():
+    arp = Arpeggio(
+        rows=[ArpeggioRow(1, 0, 0)] * 3,
+        terminator=constants.PROGRAM_JUMP,
+        jump=1,
+    )
+    assert arp.to_bytes() == bytes((1, 0, 0) * 3 + (0xFD, 1))
+
+
+def test_song_inner_programs_default_empty():
+    assert Song().inner_programs == [None] * constants.ARP_COUNT

@@ -1,8 +1,7 @@
 """Read a Music Assembler tune (PSID/.sid or .prg image) into a Song.
 
 Table bases come from the player code's own operands (see
-:mod:`pymusicassembler.layout`); a variant whose player is not found raises
-:class:`MusicAssemblerParseError` rather than yielding garbage.
+:mod:`pymusicassembler.layout`); an unrecognized player raises a parse error.
 """
 
 from typing import List, Optional, Tuple
@@ -23,6 +22,8 @@ from pymusicassembler import constants, layout
 from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.player import Player
 from pymusicassembler.model import (
+    Arpeggio,
+    ArpeggioRow,
     Instrument,
     OrderEntry,
     Orderlist,
@@ -69,6 +70,8 @@ _TABLES = (
     "instr",
     "freq_lo",
     "freq_hi",
+    "inner_lo",
+    "inner_hi",
 )
 
 
@@ -210,6 +213,63 @@ def _parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
     return Pattern(data=data)
 
 
+def _parse_program(img: SidImage, addr: int, limit: int) -> Arpeggio:
+    """One arpeggio program at ``addr``: its rows, then the terminating marker.
+
+    Walks like the player: a row is three bytes (wave, note, filter); a
+    row-start byte of $FF/$FE/$FD is the terminator (a $FD carries the
+    row to continue at).
+    """
+    rows: List[ArpeggioRow] = []
+    cur = 0
+    end = min(limit, addr + constants.ARP_MAX_BYTES)
+    while addr + cur < end:
+        marker = img.peek(addr + cur)
+        if marker in (
+            constants.PROGRAM_JUMP,
+            constants.PROGRAM_STOP,
+            constants.PROGRAM_RESTART,
+        ):
+            break
+        rows.append(
+            ArpeggioRow(
+                wave=img.peek(addr + cur),
+                note=img.peek(addr + cur + 1),
+                filter=img.peek(addr + cur + 2),
+            )
+        )
+        cur += constants.ARP_ROW_LEN
+    else:
+        raise MusicAssemblerParseError(
+            f"arpeggio program at {addr:#06x} has no terminator within "
+            f"{constants.ARP_MAX_BYTES} bytes; unsupported variant"
+        )
+    jump = img.peek(addr + cur + 1) if marker == constants.PROGRAM_JUMP else None
+    return Arpeggio(rows=rows, terminator=marker, jump=jump)
+
+
+def _parse_inner_programs(
+    img: SidImage, lay: "layout.Layout", base: int, limit: int
+) -> List[Optional[Arpeggio]]:
+    """The 16 arpeggio programs; ``None`` where a slot holds a placeholder.
+
+    The editor stores a tune's programs in this image and leaves the other
+    slots as placeholder pointers, often shared and often outside the image;
+    a slot is real only when its bytes terminate as a program.
+    """
+    programs: List[Optional[Arpeggio]] = []
+    for i in range(constants.ARP_COUNT):
+        ptr = img.ptr(lay.inner_lo, lay.inner_hi, i)
+        if base <= ptr < limit:
+            try:
+                programs.append(_parse_program(img, ptr, limit))
+                continue
+            except MusicAssemblerParseError:
+                pass
+        programs.append(None)
+    return programs
+
+
 def _referenced_pattern_ids(orderlists: List[Orderlist], commands=()) -> List[int]:
     skip = {constants.SILENCE_PATTERN, *commands}
     ids = set()
@@ -284,6 +344,8 @@ def parse(data: bytes) -> Song:
 
     freq_lo = [img.peek(bases["freq_lo"] + n) for n in range(constants.FREQ_TABLE_LEN)]
     freq_hi = [img.peek(bases["freq_hi"] + n) for n in range(constants.FREQ_TABLE_LEN)]
+    home = min(load, lay.entry - constants.NATIVE_PLAY_OFFSET)
+    inner_programs = _parse_inner_programs(img, lay, home, max(home, load) + len(image))
 
     return Song(
         load_addr=load,
@@ -297,6 +359,7 @@ def parse(data: bytes) -> Song:
         instruments=instruments,
         freq_lo=freq_lo,
         freq_hi=freq_hi,
+        inner_programs=inner_programs,
         image=image,
         container_header=header,
     )

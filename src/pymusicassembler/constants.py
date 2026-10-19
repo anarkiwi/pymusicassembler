@@ -66,6 +66,16 @@ INSTR_ARP_SPEED = 5
 INSTR_ARP_STEP = 6
 INSTR_PORTA = 7
 
+# Inner (arpeggio) programs, indexed by the instrument flags byte's low nibble.
+ARP_COUNT = 16
+ARP_ROW_LEN = 3  # one program row: (wave, note, filter)
+ARP_MAX_BYTES = 0x100  # a program must terminate within this many bytes
+
+# Program terminator markers (the row-start byte where a new row would begin).
+PROGRAM_JUMP = 0xFD  # jump: the following byte is the row to continue at
+PROGRAM_STOP = 0xFE  # stop: the program ends after the last row
+PROGRAM_RESTART = 0xFF  # restart: the program loops to its first row
+
 # Fixed table sizes the reader extracts.
 FREQ_TABLE_LEN = 96  # note frequency table entries
 

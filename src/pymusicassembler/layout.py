@@ -10,6 +10,7 @@ from typing import Iterable, Optional
 
 from pysidtracker import OP_LEN, CodePattern, Match, SidImage, find_code_all
 
+from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerParseError
 
 JMP_ABS = 0x4C
@@ -116,7 +117,7 @@ _FEATURES = (
     ),
 )
 
-PROGRAM_JUMP = 0xFD
+PROGRAM_JUMP = constants.PROGRAM_JUMP
 
 
 @dataclass(frozen=True)

@@ -35,6 +35,7 @@ def test_parser_read_matches_parse(tune_path):
     assert from_parser.orderlists == from_func.orderlists
     assert from_parser.patterns == from_func.patterns
     assert from_parser.instruments == from_func.instruments
+    assert from_parser.inner_programs == from_func.inner_programs
     assert from_parser.container_header == from_func.container_header
 
 
