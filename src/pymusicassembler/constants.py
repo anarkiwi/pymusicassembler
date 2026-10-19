@@ -69,6 +69,9 @@ INSTR_PORTA = 7
 # Fixed table sizes the reader extracts.
 FREQ_TABLE_LEN = 96  # note frequency table entries
 
+# C64 ROM banks a ROM-free machine reads as empty, not the power-on RAM behind them.
+ROM_BANKS = ((0xA000, 0xD000), (0xE000, 0x10000))
+
 # C64 timing. A PAL frame is 312 rasterlines x 63 cycles.
 PAL_CLOCK_HZ = _reg.PAL_CLOCK_HZ
 PAL_CYCLES_PER_FRAME = _reg.PAL_CYCLES_PER_FRAME
