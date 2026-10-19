@@ -19,10 +19,18 @@ supports, each confirmed byte-exact against the deterministic sidtrace oracle:
   (``$1500``).
 * Native self-start editor song wrapped in a PSID (a ``$78`` SEI stub at the
   image start in place of PSID vectors): eastern_promise (``$1b00``).
+* Alternative ``to_filter`` encoding (res-branch stored differently than the
+  fixed-layout signature): chotaire / cleve (``$1000``).
+* Orderlist transrep seeded into a separate work cell, not the transpose-read
+  cell (which can alias the freq-hi table): anakonda / speed_warez.
+* Sustain program table reading the C64 ROM banks, which read empty on a
+  ROM-free C64: shifting_gear (``$5000``).
 
-All are single-speed (one play call per frame); the player renders one leading
-silent play call before the first audible frame, which ``make_oracle_fixtures``
-aligns over via ``max_lead``.
+Each tune is rendered over the ``SECONDS`` window -- far deeper than an opening
+window -- so the comparison spans multiple orderlist loop points (a regression
+can strike late in a composition).  Tunes play one call per frame
+(single-speed); the player renders one leading silent play call before the
+first audible frame, which ``make_oracle_fixtures`` aligns over via ``max_lead``.
 """
 
 import os
@@ -41,6 +49,9 @@ _CACHE = Path(os.environ.get("PYMUSICASSEMBLER_ORACLE_CACHE", ".oracle-cache"))
 # see, so render a few extra frames for make_oracle_fixtures to align over.
 _MAX_LEAD = 4
 
+# Oracle render window (seconds): deep into each (looping) composition so late-in-song differences are in the compared span.
+SECONDS = 101
+
 TUNES = {
     # Standard $1021 PSID (player base $1000, load = base+$21).
     "space": "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",
@@ -54,6 +65,14 @@ TUNES = {
     "kasza_nota": "MUSICIANS/A/ASL/Kasza-Nota.sid",
     # Native self-start editor song wrapped in a PSID ($78 stub at image start).
     "eastern_promise": "MUSICIANS/M/Merman/Eastern_Promise.sid",
+    # Alternative to_filter encoding (res branch stored differently).
+    "chotaire": "MUSICIANS/C/Chotaire/It_Neednt_Be_a_Dream.sid",
+    "cleve": "MUSICIANS/C/Cleve/Cleve_06.sid",
+    # Orderlist transrep seeded into a separate work cell.
+    "anakonda": "MUSICIANS/A/Anakonda/Anakonda.sid",
+    "speed_warez": "MUSICIANS/A/Anakonda/Speed_Warez.sid",
+    # Program table reading the C64 ROM banks (relocated base $5000).
+    "shifting_gear": "MUSICIANS/M/MC/Shifting_Gear.sid",
 }
 
 
@@ -66,7 +85,8 @@ tune_id, oracle_match = make_oracle_fixtures(
     hvsc_cache=_CACHE / "hvsc",
     oracle_cache=_CACHE / "csv",
     render=_render,
-    frames=250,
+    frames=None,
+    seconds=SECONDS,
     max_lead=_MAX_LEAD,
 )
 
