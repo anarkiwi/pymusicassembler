@@ -45,7 +45,7 @@ _ROUTINES = (
     (
         "to_filter",
         "8E {filter_owner:w} C8 B1 ?? 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
-        " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 8D 17 ?? D0 09 8D {fc_ctr_reset:w}"
+        " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 ?? 17 ?? ?? 09 8D {fc_ctr_reset:w}"
         " BD {res_presets:w} 8D 17 ?? A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
         " 9D {arp_substep:w} 9D {arp_phase:w}",
     ),
@@ -88,6 +88,9 @@ _INIT = CodePattern(
     "A9 ?? 8D 18 ?? A9 ?? 8D 17 ?? 29 0F 8D ?? ?? A2 0F 9D ?? ?? CA 10 FA A2 02"
 )
 
+# Work cell holding the orderlist transrep byte, distinct from the transpose read cell.
+TRANSREP_BYTE = CodePattern("9D {cell:w} 29 0F 9D {repeat:w}")
+
 # Optional commands later builds decode: (feature, pattern, captured cell that
 # must equal the named Layout cell, so a match belongs to this player instance).
 _FEATURES = (
@@ -129,6 +132,7 @@ class Layout:
     order_hi: int
     pattern_id: int
     transrep: int
+    transrep_byte: int
     repeat: int
     ctrl: int
     pattern_lo: int
@@ -287,4 +291,10 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
             for m in find_code_all(image, pattern, start=start, end=end)
         ):
             found[feature] = True
+    for hit in find_code_all(image, TRANSREP_BYTE, start=start, end=end):
+        if hit.captures["repeat"] == found["repeat"]:
+            found["transrep_byte"] = hit.captures["cell"]
+            break
+    else:
+        found["transrep_byte"] = found["transrep"]
     return Layout(**{f.name: found[f.name] for f in fields(Layout) if f.name in found})

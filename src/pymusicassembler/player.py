@@ -71,10 +71,23 @@ class Player(MemPlayer):
         self._wr(addr, value)
         return value
 
+    def _rom_free(self) -> None:
+        """Zero the C64 ROM banks; a ROM-free machine reads them empty, not power-on RAM."""
+        img_lo = self._load
+        img_hi = img_lo + len(self._song.image)
+        for start, end in constants.ROM_BANKS:
+            if img_hi <= start or img_lo >= end:
+                self._mem[start:end] = b"\x00" * (end - start)
+            elif start < img_lo or img_hi < end:
+                if start < img_lo:
+                    self._mem[start:img_lo] = b"\x00" * (img_lo - start)
+                if img_hi < end:
+                    self._mem[img_hi:end] = b"\x00" * (end - img_hi)
+
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
-        # self._mem is already the shared power-on start-up image with the tune
-        # loaded (MemPlayer), so a record read past the image sees power-on RAM.
+        # _mem is the power-on image with the tune loaded; the C64 ROM banks read empty.
+        self._rom_free()
         self._mpu, self._bus = wire_mpu(self._mem)
         run_to_rts(self._mpu, self._bus, self._song.init_addr, subtune, MAX_CYCLES)
         self._entries = {m.addr for m in layout.play_entries(self._mem)}
@@ -248,7 +261,7 @@ class Player(MemPlayer):
         self._wr(lay.order_cursor + v, y)
         self._wr(lay.pattern_id + v, self._rd(order + y))
         transrep = self._rd(order + ((y + 1) & 0xFF))
-        self._wr(lay.transrep + v, transrep)
+        self._wr(lay.transrep_byte + v, transrep)
         self._wr(lay.repeat + v, transrep & 0x0F)
 
     # -- per-call output -----------------------------------------------------
