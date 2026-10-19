@@ -2,10 +2,16 @@
 
 ## Overview
 
-Music Assembler (the Richard Bayliss / Eric Campbell era player) is a C64 SID
-music system. `pymusicassembler` parses a tune into a typed song model, runs the
-playroutine for byte-exact per-frame SID register output, and writes songs back
-to a byte-identical tune image.
+Music Assembler is a C64 SID music system written by MC (Marco Swagerman) and
+OPM of Dutch USA-Team (V1.0, February 1989); Triad (Alfatech, King Fisher)
+released the bug-fixed V1.1 (1991), V1.2 (1991), V1.3 (1992) and V1.4
+(February 1994). `pymusicassembler` parses a tune into a typed song model, runs
+the playroutine for byte-exact per-frame SID register output, and writes songs
+back to a tune image.
+
+`Multi Voice Assembler` (R. Christer, [CSDb
+140932](https://csdb.dk/release/?id=140932), AKA "Music Assembler") is an
+unrelated program — do not chase it.
 
 ## Container and detection notes
 
@@ -28,17 +34,46 @@ tables lie outside the loaded image is read after its init runs in the emulator.
 | Later | init before the play entry, `LDX #n` per voice | orderlist `$FC t`: tempo `t`; `$FD n`; wave-program `$FD r`: jump to row `r` |
 
 `write(song, dst, container="auto"|"psid"|"prg"|"native")` writes a tune image;
-`auto` re-emits the original container byte-identically. `build(read(image)) ==
-image` and the full `.sid` container re-emits byte-identically for every tune;
-`read(write(song)) == song`. The writer discovers the table bases from the same
-relocation-invariant player-code signatures the reader uses, so any load address
-re-emits, not just the standard `$1021` layout.
+`auto` re-emits the original container. `read(write(song)) == song`, and
+`build(read(image)) == image` when the source's preset table holds every record
+the reader references: the reader takes every `$80-$9F` pattern byte as a
+preset reference — note control bytes and inline filter/vibrato arguments
+included — and re-emits each referenced record (zero-filled past the source's
+end), so a source whose preset table stops earlier than that reference set
+re-emits longer (#25). Each orderlist re-emits exactly its on-disk terminator
+— no `$FF` is appended after a `$FE` silence or a `$FD n` jump (#24). The
+writer discovers the table bases from the same relocation-invariant
+player-code signatures the reader uses, so any load address re-emits, not just
+the standard `$1021` layout.
 
-## Native editor song format (`container="native"`)
+## Native editor formats
 
-The Music Assembler editor (Triad, v1.4, 1994 — [CSDb
-release 27472](https://csdb.dk/release/?id=27472)) saves songs as `S.`-prefixed
-`.prg` files. A native song is exactly the player+data image this library models
+The editor saves two file types, and every version — V1.0 (Dutch USA-Team,
+February 1989, two builds), the Triad bug-fix releases V1.1 (1991), V1.2 (1991), V1.3
+(1992), and V1.4 (February 1994) ([CSDb
+94388](https://csdb.dk/release/?id=94388), [27470](https://csdb.dk/release/?id=27470),
+[92333](https://csdb.dk/release/?id=92333), [27471](https://csdb.dk/release/?id=27471),
+[27472](https://csdb.dk/release/?id=27472)), and the Plus (Trash), TKC and Faces
+releases — writes the same `S.` layout and the same `P.` bytes (differing only
+in the player's saved work-RAM snapshot and, for `S.` files, the chosen load
+address):
+
+| file | load | contents |
+| --- | --- | --- |
+| `S.` song | chosen at save — the editor relocates the song anywhere in `$0400-$FF00` | the player + data, self-starting |
+| `P.` preset bank | `$4300`, 768 bytes | 16 arpeggios × 32 rows (`wave, note, filter`; `$FE` stop / `$FF` restart) + 32 presets × 8 bytes (the `Instrument` record layout) |
+
+`S.` songs read into a `Song` and write back via `container="native"`,
+byte-identically where the round-trip conditions above hold. `container="native"`
+keeps the source's table order and emits at the tune's own base — it does not
+yet do the editor's save-time relocation or table reflow, so an export of a
+table order the editor cannot load plays but is not an editor song, and builds
+the editor cannot represent raise `SongValidationError` (#28). `P.` banks are
+not read or written yet — `read()` rejects them (#27).
+
+### `S.` songs (`container="native"`)
+
+A native song is exactly the player+data image this library models
 with a **self-starting IRQ-install stub** in place of a PSID header:
 
 ```
@@ -55,9 +90,19 @@ HVSC rips of these songs just swap the first six bytes for PSID `JMP init` /
 reverses that: it re-emits the data, finds the player base from the play-entry
 signature (`base = tempo_cell - $90`, where the tempo prescaler is `base+$90`),
 and writes the self-start stub back at `base` — at the tune's **own** load
-address (no relocation). A song whose image already carries the stub re-emits
-byte-for-byte; a source that truncated a referenced instrument record is
-re-emitted in full (a few trailing zero bytes longer).
+address, with no relocation. When the preset table holds the reader's full
+reference set the re-emission is byte-for-byte; where the reference set
+outruns the stored table, the missing records are zero-filled in and the
+re-emission is longer (#25).
+
+### `P.` preset bank (not supported)
+
+The bank is the editor's second save type ("P-SAVE PRESET"): 16 arpeggios of 32
+rows (three bytes each: `wave, note, filter`; the arpeggio ends on `$FE` stop
+or `$FF` restart), then 32 presets of 8 bytes in the same record layout as the
+song's `Instrument` table — the editor's "play back your music using different
+preset banks" feature. `read()` currently rejects it (`MusicAssemblerParseError:
+no play entry found`); reading and byte-identical writing are tracked in #27.
 
 ## Data model
 
@@ -161,10 +206,19 @@ oracle comparison works.
 
 ## References
 
-- [Music Assembler](https://www.codebase64.org/) (Richard Bayliss / Eric
-  Campbell era player); recovered from its disassembly (`decompile.c`).
-- [Music-Assembler V1.4](https://csdb.dk/release/?id=27472) (Triad, 1994) — the
-  editor whose native `S.` song format `container="native"` emits.
+- [Music-Assembler V1.0](https://csdb.dk/release/?id=94388) (Dutch USA-Team,
+  February 1989) — code MC (Marco Swagerman) and OPM; its [user manual](https://csdb.dk/release/download.php?id=170268)
+  documents the `S.`/`P.` save formats and the editor's `$0400-$FF00`
+  save-time relocation. The player this library models is recovered from its
+  disassembly (`decompile.c`).
+- [Music-Assembler V1.1](https://csdb.dk/release/?id=27470),
+  [V1.2](https://csdb.dk/release/?id=92333),
+  [V1.3](https://csdb.dk/release/?id=27471),
+  [V1.4](https://csdb.dk/release/?id=27472) (Triad, 1991-1994) — the bug-fix
+  releases; all editor versions write the same `S.` layout and `P.` bytes that
+  `container="native"` targets.
+- [Multi Voice Assembler](https://csdb.dk/release/?id=140932) (R. Christer) —
+  an unrelated program also credited as "Music Assembler".
 - [`sidtrace`](https://github.com/anarkiwi/sidtrace) — the `sidplayfp` register
   oracle the player is validated against.
 - [pyresidfp](https://pypi.org/project/pyresidfp/) — reSIDfp SID emulation

@@ -24,8 +24,9 @@ ma.render_wav(song, "tune.wav", seconds=30)   # needs the audio extra
 song.patterns[0].data[0] = ma.constants.DUR_MIN  # tweak a pattern byte
 ma.write(song, "tune-edited.sid")
 
-# Export as a native Music Assembler editor song (self-starting ".prg" the
-# Triad v1.4 editor loads) at the tune's own base.
+# Export as a native Music Assembler editor song (self-starting ".prg", the
+# same layout in every editor version, V1.0-V1.4 and the Plus/TKC/Faces
+# releases) at the tune's own base.
 ma.write(song, "S.TUNE.prg", container="native")
 ```
 
@@ -35,7 +36,7 @@ ma.write(song, "S.TUNE.prg", container="native")
 pymusicassembler info   tune.sid
 pymusicassembler reglog tune.sid tune.reglog --seconds 30
 pymusicassembler wav    tune.sid tune.wav    --seconds 30 --model 8580
-pymusicassembler resave tune.sid out.sid     # byte-identical round-trip
+pymusicassembler resave tune.sid out.sid     # round-trip write-back (see docs/format.md)
 pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 ```
 
@@ -43,8 +44,8 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 
 - `read(src) -> Song` / `parse(bytes) -> Song` — read a `.sid`/`.prg`.
 - `write(song, dst, container="auto"|"psid"|"prg"|"native")` — write a tune
-  image; `auto` re-emits the original container byte-identically; `native`
-  emits the Music Assembler editor `S.` song (self-starting `.prg`).
+  image; `auto` re-emits the original container; `native` emits the Music
+  Assembler editor `S.` song (self-starting `.prg`).
 - `build(song) -> bytes` — the raw C64 image; `build_native(song) -> bytes` —
   the native self-starting image body; `validate(song)`.
 - `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`.
