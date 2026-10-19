@@ -56,9 +56,15 @@ class OrderEntry:
 
 @dataclass
 class Orderlist:
-    """One voice's orderlist: a sequence of entries, looping at the end."""
+    """One voice's orderlist: its entries and how it ends on disk.
+
+    ``terminator`` marks the ending -- ``ORDER_END`` (``$FF``),
+    ``SILENCE_PATTERN`` (a single-byte ``$FE``), or ``ORDER_JUMP``
+    (``$FD n``) -- so the writer emits the last entry verbatim, no ``$FF``.
+    """
 
     entries: List[OrderEntry] = field(default_factory=list)
+    terminator: int = constants.ORDER_END
 
 
 @dataclass(frozen=True)

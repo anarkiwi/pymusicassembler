@@ -58,6 +58,12 @@ NATIVE_TUNE = "DEMOS/A-F/Barbara.sid"
 # A later build (init before play; orderlist $FC/$FD and wave-program $FD).
 LATER_TUNE = "MUSICIANS/C/Cooper/Song.sid"
 
+# All three voices parked on the single-byte $FE silence terminator (#24 round-trip).
+SILENCE_TUNE = "MUSICIANS/F/Feekzoid/Another_Feekzoid_Digi_Tune.sid"
+
+# All three voices ending on a $FD n jump, a later build (#24 round-trip).
+JUMP_TUNE = "DEMOS/M-R/Raccoon_intro.sid"
+
 
 def fetch(relpath: str, *, force: bool = False) -> Path:
     """Fetch ``relpath`` from the HVSC mirror into the cache; return its path."""
