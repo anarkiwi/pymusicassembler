@@ -8,6 +8,8 @@ from pymusicassembler.errors import (
     SongValidationError,
 )
 from pymusicassembler.model import (
+    Arpeggio,
+    ArpeggioRow,
     DurationEvent,
     Instrument,
     InstrumentEvent,
@@ -30,6 +32,8 @@ from pymusicassembler.writer import build, build_native, validate, write
 __version__ = "0.6.0"
 
 __all__ = [
+    "Arpeggio",
+    "ArpeggioRow",
     "DurationEvent",
     "Instrument",
     "InstrumentEvent",

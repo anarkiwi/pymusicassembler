@@ -8,6 +8,7 @@ from pysidtracker import write_psid
 
 from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError
+from pymusicassembler.model import Arpeggio, ArpeggioRow
 from pymusicassembler.reader import parse, read
 
 
@@ -134,6 +135,7 @@ def test_relocating_rip_is_read_after_init(tune_path):
     assert copy.orderlists == song.orderlists
     assert copy.patterns == song.patterns
     assert copy.instruments == song.instruments
+    assert copy.inner_programs == song.inner_programs
 
 
 def test_relocating_prg_without_init_is_rejected(tune_path):
@@ -201,3 +203,74 @@ def test_jump_entry_carries_its_target():
     assert orderlist.terminator == constants.ORDER_JUMP
     assert orderlist.entries[-1].pattern_id == constants.ORDER_JUMP
     assert orderlist.entries[-1].control_byte() == 0x04
+
+
+@pytest.mark.parametrize(
+    "payload,expected",
+    [
+        # $FF terminator: two rows, then the restart marker (the editor's arpeggio 0).
+        (
+            (0x21, 3, 0, 0x21, 7, 0, 0xFF),
+            Arpeggio(rows=[ArpeggioRow(0x21, 3, 0), ArpeggioRow(0x21, 7, 0)]),
+        ),
+        # $FE terminator: one row, then the stop marker.
+        (
+            (0x41, 0, 0, 0xFE),
+            Arpeggio(rows=[ArpeggioRow(0x41, 0, 0)], terminator=constants.PROGRAM_STOP),
+        ),
+        # $FD jump terminator: three rows, then jump to row 2.
+        (
+            (1, 0, 0, 1, 0, 0, 1, 0, 0, 0xFD, 2),
+            Arpeggio(
+                rows=[ArpeggioRow(1, 0, 0)] * 3,
+                terminator=constants.PROGRAM_JUMP,
+                jump=2,
+            ),
+        ),
+    ],
+)
+def test_parse_program_rows_and_terminator(payload, expected):
+    view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(payload), 0x1000)
+    assert (
+        reader._parse_program(view, 0x1004, 0x1010) == expected
+    )  # pylint: disable=protected-access
+
+
+def test_parse_program_rejects_unterminated():
+    view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(0x100), 0x1000)
+    with pytest.raises(SidParseError, match="no terminator"):
+        reader._parse_program(view, 0x1004, 0x1010)  # pylint: disable=protected-access
+
+
+def test_inner_programs_are_modeled(tune_path):
+    song = read(tune_path)
+    assert len(song.inner_programs) == constants.ARP_COUNT
+    assert any(prog is not None for prog in song.inner_programs)
+    # Slot 0 is always the editor's placeholder in the corpus tunes.
+    assert song.inner_programs[0] is None
+
+
+def test_inner_program_rows_match_image(tune_path):
+    """A stored program's on-disk bytes are exactly its rows plus terminator."""
+    song = read(tune_path)
+    lay = reader.discover_layout(
+        reader.load_view(song.image, song.load_addr),
+        song.play_addr,
+        song.load_addr,
+        song.load_addr + len(song.image),
+    )
+    img = reader.load_view(song.image, song.load_addr)
+    for i, prog in enumerate(song.inner_programs):
+        if prog is None:
+            continue
+        addr = img.ptr(lay.inner_lo, lay.inner_hi, i)
+        raw = bytes(img.peek(addr + j) for j in range(len(prog.to_bytes())))
+        assert raw == prog.to_bytes()
+
+
+def test_shared_placeholder_pointers_are_not_programs(jump_tune_path):
+    """A slot group sharing one in-image pointer is the editor's placeholder, not data."""
+    song = read(jump_tune_path)
+    stored = [p for p in song.inner_programs if p is not None]
+    assert stored
+    assert len(stored) < constants.ARP_COUNT

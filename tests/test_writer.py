@@ -4,7 +4,7 @@ import pytest
 
 from pymusicassembler import constants, reader, writer
 from pymusicassembler.errors import SongValidationError
-from pymusicassembler.model import OrderEntry, Orderlist, Song
+from pymusicassembler.model import Arpeggio, ArpeggioRow, OrderEntry, Orderlist, Song
 
 
 def test_build_is_image_stable(tune_path):
@@ -24,6 +24,7 @@ def test_read_write_song_is_idempotent(tune_path):
     assert rebuilt.instruments == song.instruments
     assert rebuilt.freq_lo == song.freq_lo
     assert rebuilt.freq_hi == song.freq_hi
+    assert rebuilt.inner_programs == song.inner_programs
 
 
 def test_write_full_file_byte_identical(tune_path, tmp_path):
@@ -116,6 +117,51 @@ def test_jump_terminator_round_trips_byte_exact(jump_tune_path):
     assert reader.parse(prg).orderlists == song.orderlists
 
 
+def test_arpeggio_edit_within_reserved_region(tune_path):
+    """Fitting programs re-emit at their pointers; a later one shifts past a growth."""
+    song = reader.read(tune_path)
+    stored = [i for i, prog in enumerate(song.inner_programs) if prog is not None]
+    first, second = stored[0], stored[1]
+    song.inner_programs[first].rows += [ArpeggioRow(0x21, 3, 0)]
+    song.inner_programs[second].rows = song.inner_programs[second].rows[:1]
+    built = writer.build(song)
+    reparsed = reader.parse(bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + built)
+    assert reparsed.inner_programs == song.inner_programs
+    assert reparsed.orderlists == song.orderlists
+    assert reparsed.patterns == song.patterns
+
+
+def test_arpeggio_growth_past_reserved_region_rejected(tune_path):
+    """Growth that overflows the file's reserved region raises, not overwrites tables."""
+    song = reader.read(tune_path)
+    prog = next(p for p in song.inner_programs if p is not None)
+    prog.rows += [ArpeggioRow(0x21, 0, 0)] * 40
+    with pytest.raises(SongValidationError, match="reserves"):
+        writer.build(song)
+
+
+def test_added_arpeggio_goes_past_image_end(tune_path):
+    """A program added to a placeholder slot is stored past the image end."""
+    song = reader.read(tune_path)
+    slot = next(i for i, p in enumerate(song.inner_programs) if p is None)
+    song.inner_programs[slot] = Arpeggio(rows=[ArpeggioRow(0x41, 0, 0)])
+    built = writer.build(song)
+    assert len(built) == len(song.image) + 4
+    reparsed = reader.parse(bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + built)
+    assert reparsed.inner_programs == song.inner_programs
+    assert reparsed.instruments == song.instruments
+
+
+def test_inner_programs_restore_byte_exact(tune_path):
+    """Editing and restoring a program re-emits the source image byte-for-byte."""
+    song = reader.read(tune_path)
+    original = bytes(song.image)
+    slot = next(i for i, p in enumerate(song.inner_programs) if p is not None)
+    song.inner_programs[slot].rows.append(ArpeggioRow(0x21, 1, 0))
+    song.inner_programs[slot].rows.pop()
+    assert writer.build(song) == original
+
+
 def test_validate_rejects_no_image():
     with pytest.raises(SongValidationError):
         writer.build(Song())
@@ -125,6 +171,13 @@ def test_validate_rejects_bad_orderlist_count():
     song = Song(image=b"\x00" * 16)
     song.orderlists = song.orderlists[:2]
     with pytest.raises(SongValidationError):
+        writer.validate(song)
+
+
+def test_validate_rejects_bad_inner_programs_count():
+    song = Song(image=b"\x00" * 16)
+    song.inner_programs = song.inner_programs[:8]
+    with pytest.raises(SongValidationError, match="inner programs"):
         writer.validate(song)
 
 

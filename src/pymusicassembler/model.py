@@ -1,21 +1,11 @@
 """Typed model of a Music Assembler song.
 
-A :class:`Song` holds everything needed to play and re-emit a Music
-Assembler tune: three per-voice orderlists, the shared pattern pool,
-8-byte instrument records, the per-tune note-frequency tables and the
-instrument inner (effect) programs.
-
-Patterns are kept as RAW byte sequences (the player's own pattern
-bytecode, minus the ``$FF`` terminator).  The grammar -- ``<0x60`` note +
-control byte, ``0x60-0x7F`` bare duration, ``0x80-0x9F`` instrument
-select, ``0xA0-0xFE`` long duration -- is documented on
-:meth:`Pattern.events`, which decodes the bytes into typed events for
-inspection, while the bytes themselves drive both the player and the
-writer so a tune round-trips byte-for-byte.
-"""
+A :class:`Song` holds everything needed to play and re-emit a tune: the
+orderlists, the raw pattern pool (typed via :meth:`Pattern.events`), the
+8-byte instruments, the note-frequency tables and the 16 arpeggios."""
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerError
@@ -199,20 +189,54 @@ class Instrument:
         return cls(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7])
 
 
+@dataclass(frozen=True)
+class ArpeggioRow:
+    """One row of an arpeggio program: (wave, note, filter).
+
+    ``wave`` is ANDed with the voice's control mask and written to the
+    waveform register; ``note`` indexes the note-frequency tables (top bit
+    set: absolute index on ``pitch_skip`` builds); ``filter`` is the cutoff written when non-zero.
+    """
+
+    wave: int
+    note: int
+    filter: int
+
+    def to_bytes(self) -> bytes:
+        """The three on-disk row bytes."""
+        return bytes((self.wave & 0xFF, self.note & 0xFF, self.filter & 0xFF))
+
+
+@dataclass
+class Arpeggio:
+    """An arpeggio (inner) program: its rows, then the terminating marker.
+
+    ``terminator`` is :data:`constants.PROGRAM_RESTART` ($FF, loop to the
+    first row) or :data:`constants.PROGRAM_STOP` ($FE, end); on the later
+    builds it is :data:`constants.PROGRAM_JUMP` ($FD) and ``jump`` the row continued at.
+    """
+
+    rows: List[ArpeggioRow] = field(default_factory=list)
+    terminator: int = constants.PROGRAM_RESTART
+    jump: Optional[int] = None
+
+    def to_bytes(self) -> bytes:
+        """The program's on-disk bytes: its rows, then the terminator."""
+        out = bytearray(b for row in self.rows for b in row.to_bytes())
+        if self.terminator == constants.PROGRAM_JUMP:
+            out.extend((constants.PROGRAM_JUMP, (self.jump or 0) & 0xFF))
+        else:
+            out.append(self.terminator & 0xFF)
+        return bytes(out)
+
+
 @dataclass
 class Song:
     """A complete Music Assembler song.
 
-    ``load_addr`` is the C64 load address; ``orderlists`` are the three
-    per-voice orderlists; ``patterns`` the shared pattern pool indexed by
-    pattern id; ``instruments`` the 8-byte records indexed by instrument
-    id; ``freq_lo`` / ``freq_hi`` the per-tune split note-frequency
-    tables; ``inner_programs`` the per-instrument effect programs the
-    instrument inner-table indexes (kept as raw bytes for round-trip).
-
-    The remaining fields capture the per-tune table base addresses and
-    any image bytes the player code/data occupy, so the writer can
-    re-emit a byte-stable image.
+    The load address, the three per-voice orderlists, the shared pattern
+    pool, the 8-byte instruments, the note-frequency tables, and the 16
+    arpeggio programs (a ``None`` slot = pointer-table placeholder here).
     """
 
     # pylint: disable=too-many-instance-attributes  # a full tune is wide
@@ -229,9 +253,10 @@ class Song:
     instruments: List[Instrument] = field(default_factory=list)
     freq_lo: List[int] = field(default_factory=list)
     freq_hi: List[int] = field(default_factory=list)
+    inner_programs: List[Optional[Arpeggio]] = field(
+        default_factory=lambda: [None] * constants.ARP_COUNT
+    )
     # Raw whole-image bytes (player + data) for byte-stable re-emission.
     image: bytes = b""
-    # The original container header (PSID/RSID bytes before the image), kept
-    # so a tune read from a ``.sid`` re-emits its exact container; empty for a
-    # bare ``.prg`` or a programmatically built song.
+    # Original PSID/RSID container bytes before the image; empty for a bare ``.prg``.
     container_header: bytes = b""

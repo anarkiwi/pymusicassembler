@@ -45,6 +45,7 @@ def test_native_reread_idempotent(tune_path, tmp_path):
     assert reparsed.instruments == song.instruments
     assert reparsed.freq_lo == song.freq_lo
     assert reparsed.freq_hi == song.freq_hi
+    assert reparsed.inner_programs == song.inner_programs
 
 
 def test_native_selfstart_image_byte_exact(native_tune_path, tmp_path):

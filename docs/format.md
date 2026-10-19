@@ -41,10 +41,13 @@ preset reference — note control bytes and inline filter/vibrato arguments
 included — and re-emits each referenced record (zero-filled past the source's
 end), so a source whose preset table stops earlier than that reference set
 re-emits longer (#25). Each orderlist re-emits exactly its on-disk terminator
-— no `$FF` is appended after a `$FE` silence or a `$FD n` jump (#24). The
-writer discovers the table bases from the same relocation-invariant
-player-code signatures the reader uses, so any load address re-emits, not just
-the standard `$1021` layout.
+— no `$FF` is appended after a `$FE` silence or a `$FD n` jump (#24). Arpeggio
+programs re-emit at their slot pointers without moving — the file's reserved
+region (through the original pack's end) bounds any growth, and programs the
+song adds beyond the file's are appended past the data end with their slot
+pointer updated. The writer discovers the table bases from the same
+relocation-invariant player-code signatures the reader uses, so any load
+address re-emits, not just the standard `$1021` layout.
 
 ## Native editor formats
 
@@ -120,14 +123,22 @@ Three independent per-voice tracks:
   (`id = value & $1F`); `$A0–$FE` long duration; `$FF` terminator.
 - **Instruments** — 8-byte records: attack/decay, sustain/release, waveform,
   pulse-width init + sweep step, arp speed + step, porta/effect flags.
+- **Arpeggios (inner programs)** — 16 slots indexed by the instrument flags
+  low nibble, each a run of three-byte rows (`wave, note, filter`) ending in
+  one of: `$FF` (restart the program), `$FE` (stop it), or the later builds'
+  `$FD r` (continue at row `r`). The editor stores a tune's used programs
+  packed back-to-back after the other tables, points the slot table
+  (`inner_lo`/`inner_hi`) at them, and leaves the unused slots with
+  placeholder pointers (often shared); `Song.inner_programs` holds a program
+  per slot, `None` where the slot is a placeholder.
 - **Per-frame DSP** — tempo divider (rows advance every `n+1` play calls, `n`
   the per-tune `LDA #n` the play entry reloads it with), 16-bit pulse-width sweep, vibrato/arp
   frequency accumulators, the gate/retrigger idiom, and a self-modified
   filter-cutoff sweep.
 
 Typed model objects: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
-and the decoded pattern events `NoteEvent` / `InstrumentEvent` / `DurationEvent`
-(`Pattern.events()`).
+`Arpeggio` / `ArpeggioRow`, and the decoded pattern events `NoteEvent` /
+`InstrumentEvent` / `DurationEvent` (`Pattern.events()`).
 
 ### Notes vs the decompiled reference (decompile.c)
 

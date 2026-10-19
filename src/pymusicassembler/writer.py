@@ -2,12 +2,12 @@
 
 The Music Assembler player binary, its self-modified filter envelope and
 its baked work-RAM seed are part of the loaded image; the song's musical
-DATA (orderlists, patterns, instruments and the note-frequency tables)
-lives at per-tune base addresses discovered from the player-code
-operands.  The writer re-emits the structured DATA into those regions of
-the image (via the same relocation-invariant signatures the reader uses,
-so any load address round-trips, not just the standard $1021 layout), so a
-song read from an image round-trips byte-for-byte
+DATA (orderlists, patterns, instruments, the note-frequency tables and the
+arpeggio programs) lives at per-tune base addresses discovered from the
+player-code operands. The writer re-emits the structured DATA into those
+regions of the image (via the same relocation-invariant signatures the
+reader uses, so any load address round-trips, not just the standard $1021
+layout), so a song read from an image round-trips byte-for-byte
 (``write(read(image)) == image``) while a programmatically built or
 edited song produces a valid, playable image.
 
@@ -51,6 +51,11 @@ def validate(song: Song) -> None:
         raise SongValidationError(
             f"expected {constants.VOICES} orderlists, got {len(song.orderlists)}"
         )
+    if len(song.inner_programs) != constants.ARP_COUNT:
+        raise SongValidationError(
+            f"expected {constants.ARP_COUNT} inner programs, got "
+            f"{len(song.inner_programs)}"
+        )
     for orderlist in song.orderlists:
         for entry in orderlist.entries:
             entry.control_byte()  # range-checks transpose/repeat
@@ -73,6 +78,58 @@ def _orderlist_bytes(orderlist: Orderlist) -> bytes:
     if orderlist.terminator == constants.ORDER_END:
         out.append(constants.ORDER_END)
     return bytes(out)
+
+
+def _repack_inner_programs(
+    image: SidImage, bases: dict, load: int, image_len: int, inner_programs
+) -> None:
+    """Re-emit the stored arpeggio programs and their pointer-table entries.
+
+    Each program keeps its original pointer address (any padding the file
+    has between programs stays as found) and is only pushed past a program
+    that grew before it; added programs go after the last one.
+    """
+    stored = [i for i, prog in enumerate(inner_programs) if prog is not None]
+    if not stored:
+        return
+    lo, hi = bases["inner_lo"], bases["inner_hi"]
+    end = load + image_len
+    if not (load <= lo < end and load <= hi < end):
+        raise SongValidationError("inner programs need a pointer table in the image")
+    original = {i: image.ptr(lo, hi, i) for i in stored}
+    anchored = sorted(
+        (i for i in stored if original[i] and load <= original[i] < end),
+        key=original.__getitem__,
+    )
+    # The file's reserved program region ends at the original pack end.
+    pack_end = end
+    if anchored:
+        pack_end = max(
+            original[i] + len(reader._parse_program(image, original[i], end).to_bytes())
+            for i in anchored
+        )
+    cursor = min((original[i] for i in anchored), default=end)
+    for i in anchored:
+        data = inner_programs[i].to_bytes()
+        cursor = max(cursor, original[i])
+        if cursor + len(data) > pack_end:
+            raise SongValidationError(
+                "arpeggio programs exceed the region the file reserves for them"
+            )
+        _put(image, cursor, data)
+        _put(image, lo + i, (cursor & 0xFF,))
+        _put(image, hi + i, ((cursor >> 8) & 0xFF,))
+        cursor += len(data)
+    # Programs the song adds beyond the file's go past the image end.
+    cursor = end
+    for i in stored:
+        if i in anchored:
+            continue
+        data = inner_programs[i].to_bytes()
+        _put(image, cursor, data)
+        _put(image, lo + i, (cursor & 0xFF,))
+        _put(image, hi + i, ((cursor >> 8) & 0xFF,))
+        cursor += len(data)
 
 
 def build(song: Song) -> bytes:
@@ -108,6 +165,9 @@ def build(song: Song) -> bytes:
         _put(image, bases["freq_lo"], song.freq_lo)
     if song.freq_hi:
         _put(image, bases["freq_hi"], song.freq_hi)
+
+    # Arpeggio (inner) programs + their pointer-table entries.
+    _repack_inner_programs(image, bases, load, len(song.image), song.inner_programs)
 
     return image.to_prg()[2:]
 
