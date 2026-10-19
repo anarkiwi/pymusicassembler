@@ -45,7 +45,7 @@ _ROUTINES = (
     (
         "to_filter",
         "8E {filter_owner:w} C8 B1 ?? 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
-        " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 8D 17 ?? D0 09 8D {fc_ctr_reset:w}"
+        " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 ?? 17 ?? ?? 09 8D {fc_ctr_reset:w}"
         " BD {res_presets:w} 8D 17 ?? A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
         " 9D {arp_substep:w} 9D {arp_phase:w}",
     ),
