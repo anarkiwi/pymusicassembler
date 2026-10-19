@@ -134,25 +134,35 @@ def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int
 def _parse_orderlist(
     img: SidImage, bases: dict, voice: int, jump: Optional[int] = None
 ) -> Orderlist:
-    """Voice ``voice``'s orderlist up to ``$FF``, a ``jump`` or the silence pattern.
+    """Voice ``voice``'s orderlist, up to and including its on-disk terminator.
 
-    The player never advances past a silence entry, so nothing after it plays.
+    Ends at ``$FF``, the single-byte ``$FE`` silence (the player parks on it
+    and never reads past), or a ``$FD n`` jump; it reads only the terminator's
+    own bytes, never the next voice's list that the editor packs after it.
     """
     addr = img.ptr(bases["order_lo"], bases["order_hi"], voice)
     entries: List[OrderEntry] = []
+    terminator = constants.ORDER_END
     for cur in range(0, constants.ORDER_MAX_BYTES, 2):
         pid = img.peek(addr + cur)
         if pid == constants.ORDER_END:
-            return Orderlist(entries=entries)
+            break
+        if pid == constants.SILENCE_PATTERN:
+            entries.append(OrderEntry(pattern_id=pid))
+            terminator = constants.SILENCE_PATTERN
+            break
         ctl = img.peek(addr + cur + 1)
         entries.append(OrderEntry.from_bytes(pid, ctl))
-        if pid in (jump, constants.SILENCE_PATTERN):
-            return Orderlist(entries=entries)
-    # No terminator within the bound: a wrong base or unsupported variant.
-    raise MusicAssemblerParseError(
-        f"orderlist for voice {voice} at {addr:#06x} has no terminator "
-        f"within {constants.ORDER_MAX_BYTES} bytes; unsupported variant"
-    )
+        if jump is not None and pid == jump:
+            terminator = constants.ORDER_JUMP
+            break
+    else:
+        # No terminator within the bound: a wrong base or unsupported variant.
+        raise MusicAssemblerParseError(
+            f"orderlist for voice {voice} at {addr:#06x} has no terminator "
+            f"within {constants.ORDER_MAX_BYTES} bytes; unsupported variant"
+        )
+    return Orderlist(entries=entries, terminator=terminator)
 
 
 def _parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:

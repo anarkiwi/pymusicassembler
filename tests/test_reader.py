@@ -153,18 +153,51 @@ def test_pattern_keeps_inline_ff_args(tune_path):
 
 
 @pytest.mark.parametrize(
-    "data,jump,count",
+    "data,jump,count,terminator",
     [
-        ((0x01, 0x00, 0x02, 0x10, 0xFF), None, 2),
-        ((0x01, 0x00, 0xFE, 0x00, 0x05, 0x00), None, 2),
-        ((0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF), constants.ORDER_JUMP, 2),
-        ((0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF), None, 3),
+        # $FF terminator: two normal entries, then the loop marker.
+        ((0x01, 0x00, 0x02, 0x10, 0xFF), None, 2, constants.ORDER_END),
+        # single-byte $FE silence: the 0x35 after it is the next voice's data, not swallowed.
+        ((0x01, 0x00, 0xFE, 0x35), None, 2, constants.SILENCE_PATTERN),
+        # $FD n jump (the player honours $FD): the jump entry is the terminator.
+        ((0x01, 0x00, 0xFD, 0x02), constants.ORDER_JUMP, 2, constants.ORDER_JUMP),
+        # $FD with no jump command: a plain pattern, and $FF ends the list.
+        ((0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF), None, 3, constants.ORDER_END),
     ],
 )
-def test_orderlist_ends_where_the_player_stops_reading(data, jump, count):
+def test_orderlist_ends_where_the_player_stops_reading(data, jump, count, terminator):
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(data), 0x1000)
     bases = {"order_lo": 0x1000, "order_hi": 0x1001}
     orderlist = reader._parse_orderlist(  # pylint: disable=protected-access
         view, bases, 0, jump
     )
     assert len(orderlist.entries) == count
+    assert orderlist.terminator == terminator
+
+
+def test_silence_entry_reads_no_control_byte():
+    """A $FE terminator is one byte; the following byte (next voice) is not read."""
+    view = reader.load_view(
+        bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFE, 0x87)), 0x1000
+    )
+    bases = {"order_lo": 0x1000, "order_hi": 0x1001}
+    orderlist = reader._parse_orderlist(
+        view, bases, 0
+    )  # pylint: disable=protected-access
+    assert orderlist.terminator == constants.SILENCE_PATTERN
+    assert orderlist.entries[-1].pattern_id == constants.SILENCE_PATTERN
+    assert orderlist.entries[-1].control_byte() == 0
+
+
+def test_jump_entry_carries_its_target():
+    """A $FD terminator is two bytes ($FD n); the target n is the entry's control byte."""
+    view = reader.load_view(
+        bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFD, 0x04)), 0x1000
+    )
+    bases = {"order_lo": 0x1000, "order_hi": 0x1001}
+    orderlist = reader._parse_orderlist(  # pylint: disable=protected-access
+        view, bases, 0, constants.ORDER_JUMP
+    )
+    assert orderlist.terminator == constants.ORDER_JUMP
+    assert orderlist.entries[-1].pattern_id == constants.ORDER_JUMP
+    assert orderlist.entries[-1].control_byte() == 0x04

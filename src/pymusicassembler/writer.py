@@ -26,7 +26,7 @@ from pysidtracker import SidError, SidImage, write_psid
 
 from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError, SongValidationError
-from pymusicassembler.model import Song
+from pymusicassembler.model import Orderlist, Song
 
 
 def _put(image: SidImage, addr: int, values) -> None:
@@ -56,6 +56,25 @@ def validate(song: Song) -> None:
             entry.control_byte()  # range-checks transpose/repeat
 
 
+def _orderlist_bytes(orderlist: Orderlist) -> bytes:
+    """An orderlist's on-disk bytes: its entries plus exactly its terminator.
+
+    A ``$FF`` terminator is appended; a ``$FE`` silence is the last entry's
+    single pattern-id byte; a ``$FD n`` jump is the last entry's two bytes;
+    a silence or jump is never padded with a ``$FF``.
+    """
+    out = []
+    last = len(orderlist.entries) - 1
+    for i, entry in enumerate(orderlist.entries):
+        if i == last and orderlist.terminator == constants.SILENCE_PATTERN:
+            out.append(entry.pattern_id & 0xFF)
+        else:
+            out.extend((entry.pattern_id & 0xFF, entry.control_byte()))
+    if orderlist.terminator == constants.ORDER_END:
+        out.append(constants.ORDER_END)
+    return bytes(out)
+
+
 def build(song: Song) -> bytes:
     """Serialize ``song`` to a raw Music Assembler C64 image."""
     validate(song)
@@ -66,15 +85,10 @@ def build(song: Song) -> bytes:
     except SidParseError as exc:
         raise SongValidationError(str(exc)) from exc
 
-    # Orderlists: write each voice's entries followed by the $FF terminator,
-    # in place at the address its pointer-table entry references.
+    # Orderlists: re-emit each voice's entries and exact terminator at its pointer address.
     for voice, orderlist in enumerate(song.orderlists):
         addr = image.ptr(bases["order_lo"], bases["order_hi"], voice)
-        flat = []
-        for entry in orderlist.entries:
-            flat.extend((entry.pattern_id & 0xFF, entry.control_byte()))
-        flat.append(constants.ORDER_END)
-        _put(image, addr, flat)
+        _put(image, addr, _orderlist_bytes(orderlist))
 
     # Patterns: write each pattern's raw bytes + terminator at its address.
     for pattern_id, pattern in enumerate(song.patterns):

@@ -46,3 +46,15 @@ def native_tune_path():
     offline, mirroring the shared ``tune_path`` fixture.
     """
     return _fetch_or_skip(fetch_tunes.NATIVE_TUNE)
+
+
+@pytest.fixture
+def silence_tune_path():
+    """A tune parked on the single-byte $FE silence terminator (#24)."""
+    return _fetch_or_skip(fetch_tunes.SILENCE_TUNE)
+
+
+@pytest.fixture
+def jump_tune_path():
+    """A tune whose orderlists end on a $FD n jump (#24)."""
+    return _fetch_or_skip(fetch_tunes.JUMP_TUNE)

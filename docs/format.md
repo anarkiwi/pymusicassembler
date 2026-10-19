@@ -64,8 +64,11 @@ re-emitted in full (a few trailing zero bytes longer).
 Three independent per-voice tracks:
 
 - **Orderlists** — one per voice, 2-byte entries
-  `(pattern_id, transpose << 4 | repeat)`, terminated by `$FF` (loop to start);
-  pattern id `$FE` is a silence marker.
+  `(pattern_id, transpose << 4 | repeat)`. Each list ends in exactly one of:
+  a `$FF` byte (loop to start), a single-byte `$FE` silence entry, or a
+  `$FD n` jump entry. The reader records which ending it met and `build`
+  re-emits just that terminator — it never pads a `$FF` after `$FE` or `$FD n`
+  (which would overwrite the next voice's data packed after it).
 - **Patterns** — player bytecode: `< $60` note (+ a control byte, with two
   inline argument bytes for a filter (`$80` bit) or vibrato/arp (`$20` bit)
   command); `$60–$7F` bare duration; `$80–$9F` instrument select
