@@ -71,6 +71,14 @@ ARP_COUNT = 16
 ARP_ROW_LEN = 3  # one program row: (wave, note, filter)
 ARP_MAX_BYTES = 0x100  # a program must terminate within this many bytes
 
+# P. preset bank ("P-SAVE PRESET"): a bare .prg loading at $4300 with 16 arpeggio slots of 32 bytes, then 32 preset records (the song's Instrument layout).
+PRESET_BANK_LOAD = 0x4300
+PRESET_BANK_ARP_SLOT = 32
+PRESET_BANK_PRESETS = 32
+PRESET_BANK_BODY = (
+    ARP_COUNT * PRESET_BANK_ARP_SLOT + PRESET_BANK_PRESETS * INSTR_RECORD_SIZE
+)
+
 # Program terminator markers (the row-start byte where a new row would begin).
 PROGRAM_JUMP = 0xFD  # jump: the following byte is the row to continue at
 PROGRAM_STOP = 0xFE  # stop: the program ends after the last row

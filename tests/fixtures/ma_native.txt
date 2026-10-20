@@ -1,0 +1,5 @@
+# Music Assembler editor native fixtures (csdb.dk) -- SHA-256 pins only; the
+# files are copyright works and are NEVER committed. Cache: scripts/fetch_native.py
+# release_id<TAB>name<TAB>sha256<TAB>description
+94388	P.	eb03ea4969781f527ac132552fb6af669f16d8627692f27ccf441ed2d968b6b1	release P. preset bank (770 bytes, load $4300)
+94388	S.FOR SHAPE	28a7d9fd5654b0264273eb162864378788635ac3d9863a9e77cf0e071d85df03	release S. song; presets 2-14 of P. equal its instruments 2-14

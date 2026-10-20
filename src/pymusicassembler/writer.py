@@ -26,7 +26,7 @@ from pysidtracker import SidError, SidImage, write_psid
 
 from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError, SongValidationError
-from pymusicassembler.model import Orderlist, Song
+from pymusicassembler.model import Orderlist, PresetBank, Song
 
 
 def _put(image: SidImage, addr: int, values) -> None:
@@ -115,7 +115,7 @@ def _repack_inner_programs(
             original[i] + len(reader._parse_program(image, original[i], end).to_bytes())
             for i in anchored
         )
-    cursor = min((original[i] for i in anchored), default=end)
+    cursor = min((original[i] for i in anchored), default=image.end)
     for i in anchored:
         data = inner_programs[i].to_bytes()
         cursor = max(cursor, original[i])
@@ -127,8 +127,8 @@ def _repack_inner_programs(
         _put(image, lo + i, (cursor & 0xFF,))
         _put(image, hi + i, ((cursor >> 8) & 0xFF,))
         cursor += len(data)
-    # Programs the song adds beyond the file's go past the image end.
-    cursor = end
+    # Programs the song adds beyond the file's go past the image end (data writes may have extended it: append after what is there).
+    cursor = image.end
     for i in stored:
         if i in anchored:
             continue
@@ -137,6 +137,19 @@ def _repack_inner_programs(
         _put(image, lo + i, (cursor & 0xFF,))
         _put(image, hi + i, ((cursor >> 8) & 0xFF,))
         cursor += len(data)
+    # Empty slots must read back empty: clear a pointer the file claims as a program; leave placeholder pointers (non-program targets) as-is.
+    for i in range(constants.ARP_COUNT):
+        if inner_programs[i] is not None:
+            continue
+        ptr = image.ptr(lo, hi, i)
+        if not (ptr and load <= ptr < end):
+            continue
+        try:
+            reader._parse_program(image, ptr, end)
+        except SidParseError:
+            continue
+        _put(image, lo + i, (0,))
+        _put(image, hi + i, (0,))
 
 
 def build(song: Song) -> bytes:
@@ -279,3 +292,19 @@ def _wrap_psid(song: Song, image: bytes) -> bytes:
         author=song.author,
         released=song.released,
     )
+
+
+def build_presets(bank: PresetBank) -> bytes:
+    """Serialize a preset bank to its 768-byte body (no load prefix)."""
+    return bank.to_bytes()
+
+
+def write_presets(bank: PresetBank, dst) -> Path:
+    """Write ``bank`` as the editor's ``P.`` file: load ``$4300`` + body."""
+    body = build_presets(bank)
+    blob = (
+        bytes((constants.PRESET_BANK_LOAD & 0xFF, constants.PRESET_BANK_LOAD >> 8))
+        + body
+    )
+    Path(dst).write_bytes(blob)
+    return Path(dst)

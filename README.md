@@ -4,8 +4,9 @@ Pure-Python reader, writer, and player for
 [Music Assembler](https://csdb.dk/release/?id=94388) C64 SID songs — the Dutch
 USA-Team system of MC (Marco Swagerman) and OPM (V1.0, February 1989) and the
 Triad bug-fix releases V1.1-V1.4 (1991-1994) — with byte-exact per-frame SID
-register output, WAV rendering through an emulated SID, write-back, and export
-to the native editor song format (the `S.` files every editor version writes).
+register output, WAV rendering through an emulated SID, write-back, and the
+native editor formats of every editor version: the `S.` song export and the
+`P.` preset bank (read, write, and apply to a song).
 
 Consumes `.sid` files (PSID/RSID containers) and bare `.prg` images through the
 shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) base: every

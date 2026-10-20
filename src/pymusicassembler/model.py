@@ -1,8 +1,4 @@
-"""Typed model of a Music Assembler song.
-
-A :class:`Song` holds everything needed to play and re-emit a tune: the
-orderlists, the raw pattern pool (typed via :meth:`Pattern.events`), the
-8-byte instruments, the note-frequency tables and the 16 arpeggios."""
+"""Typed models: the Music Assembler song and the editor's P. preset bank."""
 
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -231,6 +227,100 @@ class Arpeggio:
 
 
 @dataclass
+class PresetBank:
+    """The editor's ``P.`` preset bank: 16 arpeggio slots + 32 presets.
+
+    ``arpeggios[i]`` is the i-th program (``None`` = its empty zero slot);
+    ``presets`` lay out like the song's instrument table.  Disk form: the
+    768-byte body at ``$4300`` under a two-byte load-address prefix.
+    """
+
+    arpeggios: List[Optional[Arpeggio]] = field(
+        default_factory=lambda: [None] * constants.ARP_COUNT
+    )
+    presets: List[Instrument] = field(
+        default_factory=lambda: [
+            Instrument() for _ in range(constants.PRESET_BANK_PRESETS)
+        ]
+    )
+
+    def to_bytes(self) -> bytes:
+        """The bank's 768-byte body: zero-padded arpeggio slots, then presets."""
+        if len(self.arpeggios) != constants.ARP_COUNT:
+            raise MusicAssemblerError(
+                f"preset bank needs {constants.ARP_COUNT} arpeggio slots, "
+                f"got {len(self.arpeggios)}"
+            )
+        if len(self.presets) != constants.PRESET_BANK_PRESETS:
+            raise MusicAssemblerError(
+                f"preset bank needs {constants.PRESET_BANK_PRESETS} presets, "
+                f"got {len(self.presets)}"
+            )
+        out = bytearray()
+        for i, prog in enumerate(self.arpeggios):
+            data = b"" if prog is None else prog.to_bytes()
+            if len(data) > constants.PRESET_BANK_ARP_SLOT:
+                raise MusicAssemblerError(
+                    f"arpeggio slot {i} needs {len(data)} bytes, "
+                    f"the bank slot holds {constants.PRESET_BANK_ARP_SLOT}"
+                )
+            out.extend(data)
+            out.extend(b"\x00" * (constants.PRESET_BANK_ARP_SLOT - len(data)))
+        out += b"".join(preset.to_bytes() for preset in self.presets)
+        return bytes(out)
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "PresetBank":
+        """Parse the bank's 768-byte body into a typed :class:`PresetBank`."""
+        if len(data) != constants.PRESET_BANK_BODY:
+            raise MusicAssemblerError(
+                f"preset bank body must be {constants.PRESET_BANK_BODY} bytes, "
+                f"got {len(data)}"
+            )
+        arpeggios: List[Optional[Arpeggio]] = []
+        slot_len = constants.PRESET_BANK_ARP_SLOT
+        for i in range(constants.ARP_COUNT):
+            slot = data[i * slot_len : (i + 1) * slot_len]
+            if not any(slot):
+                arpeggios.append(None)
+                continue
+            rows: List[ArpeggioRow] = []
+            cur = 0
+            terminator = None
+            while cur < slot_len:
+                marker = slot[cur]
+                if marker in (
+                    constants.PROGRAM_JUMP,
+                    constants.PROGRAM_STOP,
+                    constants.PROGRAM_RESTART,
+                ):
+                    terminator = marker
+                    break
+                if cur + constants.ARP_ROW_LEN > slot_len:
+                    raise MusicAssemblerError(
+                        f"arpeggio slot {i} rows overrun the "
+                        f"{slot_len}-byte bank slot without a terminator"
+                    )
+                rows.append(
+                    ArpeggioRow(
+                        wave=slot[cur],
+                        note=slot[cur + 1],
+                        filter=slot[cur + 2],
+                    )
+                )
+                cur += constants.ARP_ROW_LEN
+            jump = slot[cur + 1] if terminator == constants.PROGRAM_JUMP else None
+            arpeggios.append(Arpeggio(rows=rows, terminator=terminator, jump=jump))
+        arps_off = constants.ARP_COUNT * slot_len
+        rec = constants.INSTR_RECORD_SIZE
+        presets = [
+            Instrument.from_bytes(data[arps_off + i * rec : arps_off + (i + 1) * rec])
+            for i in range(constants.PRESET_BANK_PRESETS)
+        ]
+        return cls(arpeggios=arpeggios, presets=presets)
+
+
+@dataclass
 class Song:
     """A complete Music Assembler song.
 
@@ -260,3 +350,13 @@ class Song:
     image: bytes = b""
     # Original PSID/RSID container bytes before the image; empty for a bare ``.prg``.
     container_header: bytes = b""
+
+    def apply_preset_bank(self, bank: PresetBank) -> None:
+        """Swap in the bank's presets and arpeggios.
+
+        The editor's "play back your music using different preset banks":
+        the song keeps its orderlists and patterns and now references the
+        bank's 32 presets and 16 arpeggio programs, ready for :func:`build`.
+        """
+        self.instruments = list(bank.presets)
+        self.inner_programs = list(bank.arpeggios)

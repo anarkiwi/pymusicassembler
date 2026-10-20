@@ -28,6 +28,12 @@ ma.write(song, "tune-edited.sid")
 # same layout in every editor version, V1.0-V1.4 and the Plus/TKC/Faces
 # releases) at the tune's own base.
 ma.write(song, "S.TUNE.prg", container="native")
+
+# The editor's P. preset bank: read, write, or apply it to a song.
+bank = ma.read_presets("P.TUNE.p")
+song.apply_preset_bank(bank)               # the song now plays with the bank's presets
+ma.write(song, "S.TUNE.prg", container="native")
+ma.write_presets(ma.read_presets("P.TUNE.p"), "P.COPY.p")
 ```
 
 ## Command line
@@ -43,9 +49,16 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 ## Public API
 
 - `read(src) -> Song` / `parse(bytes) -> Song` — read a `.sid`/`.prg`.
+- `read_presets(src) -> PresetBank` / `parse_presets(bytes)` — read the
+  editor's `P.` preset bank (the 768-byte `$4300` body, with or without its
+  load prefix).
 - `write(song, dst, container="auto"|"psid"|"prg"|"native")` — write a tune
   image; `auto` re-emits the original container; `native` emits the Music
   Assembler editor `S.` song (self-starting `.prg`).
+- `write_presets(bank, dst)` — write the editor's `P.` file (load `$4300` +
+  the 768-byte body); `build_presets(bank) -> bytes` — the body;
+  `Song.apply_preset_bank(bank)` — make a song reference the bank's presets
+  and arpeggios (the editor's "play back with different preset banks").
 - `build(song) -> bytes` — the raw C64 image; `build_native(song) -> bytes` —
   the native self-starting image body; `validate(song)`.
 - `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`.
@@ -53,8 +66,8 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 - `render_grid(song, nframes) -> list[list[int]]` — forward-filled grid.
 - `render_samples` / `render_wav` / `write_wav` — audio (pyresidfp extra).
 - `iter_register_writes` / `read_reglog` / `write_reglog` / `RegWrite`.
-- Model: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`, and the
-  decoded pattern events `NoteEvent` / `InstrumentEvent` / `DurationEvent`
-  (`Pattern.events()`).
+- Model: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
+  `PresetBank`, and the decoded pattern events `NoteEvent` / `InstrumentEvent`
+  / `DurationEvent` (`Pattern.events()`).
 - Errors: `MusicAssemblerError`, `MusicAssemblerParseError` (a
   `pysidtracker.SidParseError`; alias `SidParseError`), `SongValidationError`.
