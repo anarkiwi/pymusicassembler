@@ -8,17 +8,24 @@ comparison lives in :mod:`tests.test_oracle_hvsc` (marker ``oracle``), which
 reuses :func:`pysidtracker.testing.make_oracle_fixtures`.
 """
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
+from pysidtracker import fixture as native_fixture
+from pysidtracker import load_manifest
 from pysidtracker.testing import make_tune_fixtures
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 import fetch_tunes  # noqa: E402  (after sys.path tweak)
+
+# Editor native fixtures: SHA-256 pins in tests/fixtures/ma_native.txt, files cached gitignored by scripts/fetch_native.py.
+NATIVE_MANIFEST = REPO / "tests" / "fixtures" / "ma_native.txt"
+NATIVE_CACHE = Path(os.environ.get("MA_NATIVECACHE", str(REPO / "tests" / ".native")))
 
 # Parametrized ``tune_id`` / ``tune_path`` fixtures over the Music Assembler
 # test tunes, resolving via the shared local-tree/cache/mirror logic.
@@ -46,6 +53,27 @@ def native_tune_path():
     offline, mirroring the shared ``tune_path`` fixture.
     """
     return _fetch_or_skip(fetch_tunes.NATIVE_TUNE)
+
+
+def _native(name: str) -> Path:
+    """A committed-pin native fixture from the cache; skip when it is absent."""
+    entry = {e.name: e for e in load_manifest(NATIVE_MANIFEST)}[name]
+    path = native_fixture(entry.sha256, NATIVE_CACHE)
+    if path is None:
+        pytest.skip(f"native fixture {name!r} not cached; run scripts/fetch_native.py")
+    return path
+
+
+@pytest.fixture
+def preset_bank_path():
+    """The release ``P.`` preset bank (the editor's P-SAVE PRESET file)."""
+    return _native("P.")
+
+
+@pytest.fixture
+def shape_song_path():
+    """The release ``S.FOR SHAPE`` song on the same disk as ``P.``."""
+    return _native("S.FOR SHAPE")
 
 
 @pytest.fixture

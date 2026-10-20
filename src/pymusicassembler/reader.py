@@ -28,6 +28,7 @@ from pymusicassembler.model import (
     OrderEntry,
     Orderlist,
     Pattern,
+    PresetBank,
     Song,
 )
 
@@ -381,6 +382,29 @@ def parse(data: bytes) -> Song:
 def read(src) -> Song:
     """Read a Music Assembler tune from a path, bytes, or file-like object."""
     return parse(read_bytes(src))
+
+
+def parse_presets(data: bytes) -> PresetBank:
+    """Parse a ``P.`` preset bank file into a :class:`PresetBank`.
+
+    Accepts the editor's 768-byte body at ``$4300`` with or without its
+    two-byte load-address prefix; any other size is not a preset bank.
+    """
+    body = data
+    if len(body) == constants.PRESET_BANK_BODY + 2:
+        body = body[2:]
+    if len(body) != constants.PRESET_BANK_BODY:
+        raise MusicAssemblerParseError(
+            f"preset bank must be {constants.PRESET_BANK_BODY} bytes"
+            f" (the editor's $4300 bank, with or without its load prefix),"
+            f" got {len(data)}"
+        )
+    return PresetBank.from_bytes(body)
+
+
+def read_presets(src) -> PresetBank:
+    """Read a ``P.`` preset bank from a path, bytes, or file-like object."""
+    return parse_presets(read_bytes(src))
 
 
 class MusicAssemblerSidParser(BaseSidParser):

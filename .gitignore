@@ -219,6 +219,9 @@ __marimo__/
 
 # Music Assembler test tunes are HVSC copyright works -- never committed.
 tests/.tunecache/
+# Editor native P./S. fixtures are csdb.dk copyright works -- never committed
+# (pinned by SHA-256 in tests/fixtures/ma_native.txt; scripts/fetch_native.py).
+tests/.native/
 *.sid
 *.prg
 *.wav

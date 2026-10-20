@@ -64,7 +64,7 @@ address):
 | file | load | contents |
 | --- | --- | --- |
 | `S.` song | chosen at save — the editor relocates the song anywhere in `$0400-$FF00` | the player + data, self-starting |
-| `P.` preset bank | `$4300`, 768 bytes | 16 arpeggios × 32 rows (`wave, note, filter`; `$FE` stop / `$FF` restart) + 32 presets × 8 bytes (the `Instrument` record layout) |
+| `P.` preset bank | `$4300`, 768 bytes | 16 arpeggio slots of 32 bytes (`wave, note, filter` rows; `$FE` stop / `$FF` restart; empty slot = all zeroes) + 32 presets × 8 bytes (the `Instrument` record layout) |
 
 `S.` songs read into a `Song` and write back via `container="native"`,
 byte-identically where the round-trip conditions above hold. `container="native"`
@@ -72,7 +72,8 @@ keeps the source's table order and emits at the tune's own base — it does not
 yet do the editor's save-time relocation or table reflow, so an export of a
 table order the editor cannot load plays but is not an editor song, and builds
 the editor cannot represent raise `SongValidationError` (#28). `P.` banks are
-not read or written yet — `read()` rejects them (#27).
+not tunes: `read()` rejects them, and `read_presets()` / `write_presets()`
+(#27) handle them as `PresetBank`.
 
 ### `S.` songs (`container="native"`)
 
@@ -98,14 +99,30 @@ reference set the re-emission is byte-for-byte; where the reference set
 outruns the stored table, the missing records are zero-filled in and the
 re-emission is longer (#25).
 
-### `P.` preset bank (not supported)
+### `P.` preset bank (`read_presets` / `write_presets`)
 
-The bank is the editor's second save type ("P-SAVE PRESET"): 16 arpeggios of 32
-rows (three bytes each: `wave, note, filter`; the arpeggio ends on `$FE` stop
-or `$FF` restart), then 32 presets of 8 bytes in the same record layout as the
-song's `Instrument` table — the editor's "play back your music using different
-preset banks" feature. `read()` currently rejects it (`MusicAssemblerParseError:
-no play entry found`); reading and byte-identical writing are tracked in #27.
+The bank is the editor's second save type ("P-SAVE PRESET") — its
+"play back your music using different preset banks" feature: 16 arpeggio slots
+of 32 bytes (three-byte `wave, note, filter` rows terminated at a row start by
+`$FE` stop, `$FF` restart, or a later build's `$FD r` jump; an unused slot is
+32 zero bytes), then 32 preset records of 8 bytes in the song's `Instrument`
+layout — a single bank can hold presets for several songs on a disk.
+
+```python
+bank = ma.read_presets("P.TUNE.p")          # path, bytes, or binary file object
+ma.write_presets(bank, "P.OUT.p")           # the editor's 770-byte file: $4300 + 768-byte body
+bank = ma.PresetBank()                      # 16 arpeggio slots + 32 presets, edited like a Song
+song.apply_preset_bank(bank)                # the song now references the bank's presets + arpeggios
+ma.write(song, "S.TUNE.prg", container="native")
+```
+
+Every editor version writes the same bytes (V1.0-Triad V1.4 and the
+Plus/TKC/Faces cracks, verified against `P.` files saved on the release disks).
+`read_presets` accepts the 768-byte body with or without the two-byte load
+prefix; `write_presets` emits the editor's exact form, so
+`write_presets(read_presets(f)) == f` on release files. `apply_preset_bank`
+swaps the song's instruments and arpeggio programs for the bank's, so the
+same orderlists and patterns play with the bank's presets.
 
 ## Data model
 
@@ -137,8 +154,8 @@ Three independent per-voice tracks:
   filter-cutoff sweep.
 
 Typed model objects: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
-`Arpeggio` / `ArpeggioRow`, and the decoded pattern events `NoteEvent` /
-`InstrumentEvent` / `DurationEvent` (`Pattern.events()`).
+`Arpeggio` / `ArpeggioRow`, `PresetBank`, and the decoded pattern events
+`NoteEvent` / `InstrumentEvent` / `DurationEvent` (`Pattern.events()`).
 
 ### Notes vs the decompiled reference (decompile.c)
 

@@ -34,6 +34,14 @@ jobs:
         with:
           path: tests/.tunecache
           key: hvsc-tunes-${{ hashFiles('tests/fixtures/ma_corpus.txt', 'scripts/fetch_tunes.py') }}
+      - name: Cache editor native fixtures
+        # The P. preset bank + its S. counterpart (csdb.dk release 94388) are
+        # copyright works; pinned by SHA-256 in tests/fixtures/ma_native.txt,
+        # fetched into tests/.native by scripts/fetch_native.py.
+        uses: actions/cache@v6
+        with:
+          path: tests/.native
+          key: ma-native-${{ hashFiles('tests/fixtures/ma_native.txt', 'scripts/fetch_native.py') }}
       - name: pytest + coverage (> 85%)
         # Tunes are HVSC copyright works (never committed); tune-dependent tests
         # fetch them from the HVSC mirror into the cached tunecache (retrying
