@@ -110,6 +110,12 @@ def load_view(image: bytes, load: int) -> SidImage:
     return SidImage.from_prg(bytes((load & 0xFF, load >> 8)) + image)
 
 
+def image_in_io_area(load: int, length: int) -> bool:
+    """True when ``[load, load+length)`` intersects the C64 I/O area $D000-$DFFF."""
+    start, end = constants.IO_AREA
+    return load < end and load + length > start
+
+
 _PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
 
 
@@ -311,6 +317,13 @@ def parse(data: bytes) -> Song:
     runs in the emulator (packed or relocating rips).
     """
     load, init, play, name, author, released, image, header = _parse_container(data)
+    if image_in_io_area(load, len(image)):
+        raise MusicAssemblerParseError(
+            f"tune image [{load:#06x},{load + len(image):#06x}) reaches the C64 I/O "
+            f"area {constants.IO_AREA[0]:#06x}-{constants.IO_AREA[1] - 1:#06x} "
+            "(a KERNAL LOAD stores into the VIC/SID/CIA chips there, not RAM, so "
+            "the player reads live I/O and the file cannot produce its stored music)"
+        )
     sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
     img, lay = _locate(image, load, init if sid else None, play)
     if not sid:
