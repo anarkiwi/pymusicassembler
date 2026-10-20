@@ -81,6 +81,39 @@ def test_rejects_image_without_player():
         parse(bytes((0x00, 0x10)) + bytes(0x400))
 
 
+@pytest.mark.parametrize(
+    "load,length,expected",
+    [
+        (0xC000, 0x1000, False),  # ends exactly at $D000: still RAM
+        (0xC000, 0x1001, True),  # one byte past $D000
+        (0xD000, 0x01, True),  # starts at $D000
+        (0xDFFF, 0x01, True),  # last I/O byte
+        (0xE000, 0x10, False),  # above the I/O area (ROM)
+        (0x1000, 0x100, False),  # low RAM
+    ],
+)
+def test_image_in_io_area_boundaries(load, length, expected):
+    assert reader.image_in_io_area(load, length) is expected
+
+
+def test_rejects_image_fully_in_io_area():
+    """A .prg loaded within $D000-$DFFF cannot be decoded (a LOAD hits the I/O chips)."""
+    with pytest.raises(SidParseError, match=r"I/O area"):
+        parse(bytes((0x00, 0xD0)) + bytes(0x100))
+
+
+def test_rejects_image_reaching_into_io_area():
+    """In-RAM load whose image extends past $D000 (the editor's $C000 s.gamers_guide_2)."""
+    with pytest.raises(SidParseError, match=r"I/O area"):
+        parse(bytes((0x00, 0xC0)) + bytes(0x1868))
+
+
+def test_image_ending_at_io_boundary_is_not_io_area():
+    """Ends exactly at $D000: the I/O guard does not fire; it fails on the missing player."""
+    with pytest.raises(SidParseError, match="no play entry"):
+        parse(bytes((0x00, 0xC0)) + bytes(0x1000))
+
+
 def test_rejects_missing_player_signature(tune_path):
     song = read(tune_path)
     image = bytearray(song.image)

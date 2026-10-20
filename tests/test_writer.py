@@ -186,6 +186,23 @@ def test_validate_rejects_out_of_range_transpose():
         OrderEntry(pattern_id=0, transpose=99).control_byte()
 
 
+def test_validate_rejects_io_image(tune_path):
+    """A song placed in the C64 I/O area cannot be emitted (it would read live I/O)."""
+    song = reader.read(tune_path)
+    song.load_addr = 0xD000
+    with pytest.raises(SongValidationError, match=r"I/O area"):
+        writer.validate(song)
+
+
+def test_build_rejects_io_image(tune_path):
+    """build() refuses a song whose image reaches the I/O area (the editor's $C000 case)."""
+    song = reader.read(tune_path)
+    song.load_addr = 0xC000
+    song.image = bytes(0x1868)  # $C000 + $1868 = $D868 reaches the C64 I/O area
+    with pytest.raises(SongValidationError, match=r"I/O area"):
+        writer.build(song)
+
+
 def test_write_rejects_unknown_container(tune_path, tmp_path):
     song = reader.read(tune_path)
     with pytest.raises(SongValidationError):

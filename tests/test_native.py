@@ -86,3 +86,11 @@ def test_native_rejects_nonstandard_layout(tune_path, monkeypatch):
     monkeypatch.setattr(reader, "find_player_base", lambda *args: None)
     with pytest.raises(SongValidationError):
         writer.build_native(song)
+
+
+def test_native_refuses_io_base(tune_path, monkeypatch):
+    """A native base reaching $D000-$DFFF is not emitted (a C64 runs it as live I/O)."""
+    song = reader.read(tune_path)
+    monkeypatch.setattr(reader, "find_player_base", lambda *args: 0xD000)
+    with pytest.raises(SongValidationError, match=r"I/O area"):
+        writer.build_native(song)

@@ -47,6 +47,13 @@ def validate(song: Song) -> None:
     """Raise :class:`SongValidationError` if ``song`` cannot be emitted."""
     if not song.image:
         raise SongValidationError("song has no base image to re-emit into")
+    if reader.image_in_io_area(song.load_addr, len(song.image)):
+        raise SongValidationError(
+            f"song image [{song.load_addr:#06x},{song.load_addr + len(song.image):#06x}) "
+            f"reaches the C64 I/O area {constants.IO_AREA[0]:#06x}-"
+            f"{constants.IO_AREA[1] - 1:#06x} (a C64 reads live I/O there, so no "
+            "correct emit -- place the song in RAM, loaded below $D000)"
+        )
     if len(song.orderlists) != constants.VOICES:
         raise SongValidationError(
             f"expected {constants.VOICES} orderlists, got {len(song.orderlists)}"
@@ -210,8 +217,17 @@ def _native(song: Song) -> Tuple[int, bytes]:
             "player is not at a standard Music Assembler layout; "
             "cannot emit the native editor format"
         )
-    tail = image[base + constants.NATIVE_PLAY_OFFSET - song.load_addr :]
-    return base, _native_stub(base) + tail
+    body = (
+        _native_stub(base)
+        + image[base + constants.NATIVE_PLAY_OFFSET - song.load_addr :]
+    )
+    if reader.image_in_io_area(base, len(body)):
+        raise SongValidationError(
+            f"native base [{base:#06x},{base + len(body):#06x}) reaches the C64 I/O "
+            f"area {constants.IO_AREA[0]:#06x}-{constants.IO_AREA[1] - 1:#06x}; a C64 "
+            "runs this data as live I/O, so the editor format cannot be emitted here"
+        )
+    return base, body
 
 
 def build_native(song: Song) -> bytes:
