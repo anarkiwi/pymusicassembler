@@ -11,7 +11,13 @@ record read past the end of the image sees what the C64 RAM held at power-on.
 
 from typing import List, Optional
 
-from pysidtracker import MemPlayer, run_to_rts, wire_mpu
+from pysidtracker import (
+    MemPlayer,
+    psid_init_bank,
+    psid_play_bank,
+    run_to_rts,
+    wire_mpu,
+)
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
 from pysidtracker.registers import PW_HI_REGS, RES_FILT, SR
 
@@ -71,25 +77,30 @@ class Player(MemPlayer):
         self._wr(addr, value)
         return value
 
-    def _rom_free(self) -> None:
-        """Zero the C64 ROM banks; a ROM-free machine reads them empty, not power-on RAM."""
-        img_lo = self._load
-        img_hi = img_lo + len(self._song.image)
-        for start, end in constants.ROM_BANKS:
-            if img_hi <= start or img_lo >= end:
-                self._mem[start:end] = b"\x00" * (end - start)
-            elif start < img_lo or img_hi < end:
-                if start < img_lo:
-                    self._mem[start:img_lo] = b"\x00" * (img_lo - start)
-                if img_hi < end:
-                    self._mem[img_hi:end] = b"\x00" * (end - img_hi)
+    def _view_rom_pages(self) -> None:
+        """Make the flat memory read what the bus does for a banked-in ROM page.
+
+        With a ROM banked in over its RAM (the PSID driver's own iomap), the C64
+        reads the ROM-less set -- a 0xEA kernal, zero basic and chargen -- not the
+        RAM behind it, so a player table that lands in those banks sees it too.
+        """
+        bus = self._bus._subject
+        for page_id, page in enumerate(bus.pages):
+            if page is None or page is bus.ram:
+                continue
+            self._mem[page_id << 12 : (page_id + 1) << 12] = page[
+                page_id << 12 : (page_id + 1) << 12
+            ]
 
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
-        # _mem is the power-on image with the tune loaded; the C64 ROM banks read empty.
-        self._rom_free()
+        # Boot the bus as the PSID driver does and leave the play bank in.
+        self._mem[1] = psid_init_bank(self._song.init_addr)
         self._mpu, self._bus = wire_mpu(self._mem)
         run_to_rts(self._mpu, self._bus, self._song.init_addr, subtune, MAX_CYCLES)
+        # Bank the play's ROM space in through the bus, which re-derives its pages.
+        self._bus[1] = psid_play_bank(self._song.play_addr or self._song.init_addr)
+        self._view_rom_pages()
         self._entries = {m.addr for m in layout.play_entries(self._mem)}
         play = self._song.play_addr
         entry = self._probe(play) if play else None
