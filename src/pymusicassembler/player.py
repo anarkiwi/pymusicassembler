@@ -150,7 +150,7 @@ class Player(MemPlayer):
     def _play(self, lay: layout.Layout) -> None:
         self._lay = lay
         if self._inc(lay.tempo, -1) < 0x80:
-            for v in range(constants.VOICES):
+            for v in lay.output_voices:
                 self._output(v)
             return
         self._wr(lay.tempo, self._rd(lay.tempo_reload))

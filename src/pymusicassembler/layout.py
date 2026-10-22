@@ -6,7 +6,7 @@ instruction that uses it, in the routine the play entry's control flow reaches.
 """
 
 from dataclasses import dataclass, fields
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Tuple
 
 from pysidtracker import OP_LEN, CodePattern, Match, SidImage, find_code_all
 
@@ -190,6 +190,7 @@ class Layout:
     order_tempo: bool = False
     order_jump: bool = False
     program_jump: bool = False
+    output_voices: Tuple[int, ...] = (0, 1, 2)
 
 
 def _as_image(mem) -> SidImage:
@@ -255,6 +256,62 @@ def _s8(value: int) -> int:
     return value - 0x100 if value & 0x80 else value
 
 
+def _resolve_voice(
+    image: SidImage, target: int, x: int, output: int
+) -> Tuple[int, bool]:
+    """``(x, reaches_output)``: follow ``target``'s ``INX``/``LDX #n``/``JMP``
+    chain, updating ``x`` as each instruction would."""
+    for _ in range(8):
+        if target == output:
+            return x, True
+        op = image.peek(target)
+        if op == 0xE8:
+            x = (x + 1) & 0xFF
+            target = (target + 1) & 0xFFFF
+        elif op == 0xA2:
+            x = image.peek(target + 1)
+            target = (target + 2) & 0xFFFF
+        elif op == JMP_ABS:
+            target = _word(image, target + 1)
+        else:
+            return x, False
+    return x, False
+
+
+def _output_voices(image: SidImage, entry: int, output: int) -> Tuple[int, ...]:
+    """The voices the play entry re-outputs on a non-underflow call.
+
+    Walks the dispatch from the entry's ``JSR output`` (``X = 0``); ``LDX #n``
+    / ``INX`` set the next voice, each call resolvable to ``output`` re-outputs
+    it, and ``JMP`` or an unrecognised instruction stops the walk.
+    """
+    voices = []
+    x = 0
+    pc = entry + 7
+    for _ in range(16):
+        op = image.peek(pc)
+        if op == 0xA2:
+            x = image.peek(pc + 1)
+            pc = (pc + 2) & 0xFFFF
+            continue
+        if op == 0xE8:
+            x = (x + 1) & 0xFF
+            pc += 1
+            continue
+        if op in (JSR_ABS, JMP_ABS):
+            voice, is_output = _resolve_voice(image, _word(image, pc + 1), x, output)
+            if not is_output:
+                break
+            voices.append(voice)
+            if op == JSR_ABS:
+                x = voice
+                pc = (pc + 3) & 0xFFFF
+                continue
+            break
+        break
+    return tuple(voices)
+
+
 def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     """The :class:`Layout` of the player whose play entry is at ``entry``.
 
@@ -298,4 +355,5 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
             break
     else:
         found["transrep_byte"] = found["transrep"]
+    found["output_voices"] = _output_voices(image, entry, found["output"])
     return Layout(**{f.name: found[f.name] for f in fields(Layout) if f.name in found})
