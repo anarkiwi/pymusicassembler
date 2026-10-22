@@ -87,9 +87,6 @@ PROGRAM_RESTART = 0xFF  # restart: the program loops to its first row
 # Fixed table sizes the reader extracts.
 FREQ_TABLE_LEN = 96  # note frequency table entries
 
-# C64 ROM banks a ROM-free machine reads as empty, not the power-on RAM behind them.
-ROM_BANKS = ((0xA000, 0xD000), (0xE000, 0x10000))
-
 # C64 I/O area: $D000-$DFFF holds the CIA/SID/VIC chips while the player runs ($01=$35-$37); a KERNAL LOAD stores into them, not RAM.
 IO_AREA = (0xD000, 0xE000)
 
