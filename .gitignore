@@ -232,3 +232,6 @@ tests/.native/
 
 # Whole-HVSC survey work dir (copyright-derived traces).
 .hvsc-survey/
+
+# Local git worktrees for PR work.
+.worktrees/
