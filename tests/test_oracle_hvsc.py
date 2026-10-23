@@ -34,17 +34,10 @@ can strike late in a composition).  Tunes play one call per frame
 first audible frame, which ``make_oracle_fixtures`` aligns over via ``max_lead``.
 """
 
-import os
-from pathlib import Path
-
 import oracle_hvsc
 import pytest
 
 from pysidtracker import make_oracle_fixtures
-
-# Cache under the workspace (a Docker-daemon-visible path, and what CI persists
-# via actions/cache). ``$PYMUSICASSEMBLER_ORACLE_CACHE`` overrides the location.
-_CACHE = Path(os.environ.get("PYMUSICASSEMBLER_ORACLE_CACHE", ".oracle-cache"))
 
 # The player renders one leading silent play call the oracle write-stream cannot
 # see, so render a few extra frames for make_oracle_fixtures to align over.
@@ -84,8 +77,6 @@ def _render(data, nframes):
 
 tune_id, oracle_match = make_oracle_fixtures(
     TUNES,
-    hvsc_cache=_CACHE / "hvsc",
-    oracle_cache=_CACHE / "csv",
     render=_render,
     frames=None,
     seconds=SECONDS,

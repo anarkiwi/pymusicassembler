@@ -217,18 +217,14 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# Music Assembler test tunes are HVSC copyright works -- never committed.
-tests/.tunecache/
-# Editor native P./S. fixtures are csdb.dk copyright works -- never committed
-# (pinned by SHA-256 in tests/fixtures/ma_native.txt; scripts/fetch_native.py).
-tests/.native/
+# pysidtracker's download cache: HVSC tunes, csdb.dk editor P./S. fixtures
+# (pinned in tests/fixtures/ma_native.txt) and sidtrace oracle traces, all
+# copyright works or derived from them -- never committed.
+.tunecache/
 *.sid
 *.prg
 *.wav
 *.sidwr.bin
-# Oracle comparison cache: fetched HVSC .sid + sidtrace CSV traces (derived
-# from copyright tunes) -- regenerated in CI via Docker, never committed.
-.oracle-cache/
 
 # Whole-HVSC survey work dir (copyright-derived traces).
 .hvsc-survey/

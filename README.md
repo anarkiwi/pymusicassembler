@@ -42,7 +42,7 @@ tests and the whole-HVSC survey.
 
 ```bash
 pip install -e ".[dev]"
-pysidtracker fixtures fetch tests/fixtures/ma_native.txt --cache tests/.native  # editor P./S. files
+pysidtracker fixtures fetch tests/fixtures/ma_native.txt  # editor P./S. files into .tunecache/native
 ./run_tests.sh        # black + pylint + pytest with coverage
 ```
 
