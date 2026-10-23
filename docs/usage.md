@@ -62,6 +62,10 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 - `build(song) -> bytes` — the raw C64 image; `build_native(song) -> bytes` —
   the native self-starting image body; `validate(song)`.
 - `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`.
+- `formats.MUSIC_ASSEMBLER` — the `musicassembler` `pysidtracker.SidFormat`
+  (entry point `pysidtracker.formats`), so `pysidtracker info|reglog|wav` play
+  Music Assembler tunes and `format:musicassembler` names this player in
+  `pysidtracker.pathdiff`.
 - `iter_frames(song, max_frames)` — per-frame writes.
 - `render_grid(song, nframes) -> list[list[int]]` — forward-filled grid.
 - `render_samples` / `render_wav` / `write_wav` — audio via
