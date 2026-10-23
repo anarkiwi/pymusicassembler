@@ -71,6 +71,7 @@ _ROUTINES = (
         " A9 {at_sweep_acc} 69 {at_sweep_step} 8D {sweep_sta:w} 8D 16 ??"
         " B5 ?? 29 0F F0 {to_arp} 20 {program:w}",
     ),
+    ("to_sustain_end", "A4 ?? B9 ?? ?? 85 ?? B5 ?? 29 40 F0 {to_pulse_sweep}"),
     (
         "to_arp",
         "BD ?? ?? 29 20 D0 ?? B5 ?? 29 10 F0 ?? DE ?? ?? 10 ?? FE ?? ?? BD ?? ??"
@@ -189,6 +190,7 @@ class Layout:
     order_tempo: bool = False
     order_jump: bool = False
     program_jump: int = 0
+    pulse_always: bool = False
     output_voices: Tuple[int, ...] = (0, 1, 2)
 
 
@@ -335,6 +337,7 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
             found[name] = value
         found[f"{at}_end"] = addr + pattern.length
     found["tempo_reload"] = found["to_reload"] + 1
+    found["pulse_always"] = found["to_pulse_sweep"] == found["to_sustain_end_end"]
     found["sid"] <<= 8
     if found["pitch_skip"] not in (0, 4):
         raise MusicAssemblerParseError("player signatures not found (pitch_skip)")

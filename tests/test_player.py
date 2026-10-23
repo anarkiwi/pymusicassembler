@@ -427,3 +427,15 @@ def test_rsid_without_an_interrupt_is_a_parse_error(tune_path):
     player = Player(_rsid(reader.read(tune_path), irq="LDA #$7F\n  STA $DC0D"))
     with pytest.raises(MusicAssemblerParseError, match="no interrupt"):
         player.render_grid(4)
+
+
+@pytest.mark.parametrize("always,expect", [(False, 0x0880), (True, 0x28A0)])
+def test_pulse_always_adds_the_step(tune_path, always, expect):
+    player = Player(reader.read(tune_path))
+    lay = player.layout = player._lay = replace(player.layout, pulse_always=always)
+    rec = 0xC000
+    player._wr(rec + constants.INSTR_PULSE_STEP, 0x20)
+    player._wr(lay.pw_lo, 0x80)
+    player._wr(lay.pw_hi, 0x08)
+    player._pulse(0, rec, 0)
+    assert player._rd(lay.pw_lo) | player._rd(lay.pw_hi) << 8 == expect
