@@ -5,15 +5,12 @@ rendered for at least its HVSC song length, so the comparison covers every
 orderlist loop point rather than an opening window.
 """
 
-import os
-from pathlib import Path
-
 import oracle_hvsc
 import pytest
 
 from pysidtracker import make_oracle_fixtures, start_subtune
+from pysidtracker.testing import default_cache
 
-_CACHE = Path(os.environ.get("PYMUSICASSEMBLER_ORACLE_CACHE", ".oracle-cache"))
 _MAX_LEAD = 4
 
 TUNES = {
@@ -54,8 +51,8 @@ def _render(data, nframes):
 
 tune_id, oracle_match = make_oracle_fixtures(
     TUNES,
-    hvsc_cache=_CACHE / "hvsc",
-    oracle_cache=_CACHE / "songs",
+    # Whole-song traces, apart from test_oracle_hvsc's shorter ones of the same stems.
+    oracle_cache=default_cache("csv") / "songs",
     render=_render,
     frames=None,
     seconds=SECONDS,

@@ -2,16 +2,15 @@
 
 Tunes are HVSC copyright works, never committed.  ``tune_path`` (built by the
 shared :func:`pysidtracker.testing.make_tune_fixtures`) and ``tune`` resolve a
-tune from a local ``$HVSC`` tree or the gitignored cache, fetching from the
-mirror on demand and skipping the test when it is unavailable offline.  The
-editor's ``P.``/``S.`` files are pinned by SHA-256 in
-``tests/fixtures/ma_native.txt`` and cached by
-``pysidtracker fixtures fetch tests/fixtures/ma_native.txt --cache tests/.native``.
+tune from a local ``$HVSC`` tree or pysidtracker's cache (``.tunecache``),
+fetching from the mirror on demand and skipping the test when it is unavailable
+offline.  The editor's ``P.``/``S.`` files are pinned by SHA-256 in
+``tests/fixtures/ma_native.txt`` and cached in ``.tunecache/native`` by
+``pysidtracker fixtures fetch tests/fixtures/ma_native.txt``.
 The byte-exact oracle comparison lives in :mod:`tests.test_oracle_hvsc` (marker
 ``oracle``), which reuses :func:`pysidtracker.testing.make_oracle_fixtures`.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -19,14 +18,13 @@ import pytest
 
 from pysidtracker import fixture as native_fixture
 from pysidtracker import load_manifest
+from pysidtracker.fixtures import default_native_cache
 from pysidtracker.testing import make_tune_fixtures, resolve_tune
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
-TUNE_CACHE = Path(os.environ.get("MA_TUNECACHE", str(REPO / "tests" / ".tunecache")))
 NATIVE_MANIFEST = REPO / "tests" / "fixtures" / "ma_native.txt"
-NATIVE_CACHE = Path(os.environ.get("MA_NATIVECACHE", str(REPO / "tests" / ".native")))
 
 # id -> HVSC relative path.  Space Invadarz on Vacation is the decompile
 # reference; 7 Years and 3LUX Intro exercise per-tune table relocation and the
@@ -37,7 +35,7 @@ TUNES = {
     "3lux": "DEMOS/0-9/3LUX_Intro.sid",
 }
 
-tune_id, tune_path = make_tune_fixtures(TUNES, TUNE_CACHE)
+tune_id, tune_path = make_tune_fixtures(TUNES)
 
 
 @pytest.fixture
@@ -45,7 +43,7 @@ def tune():
     """``tune(relpath)``: the tune's local path; skips when it is unreachable."""
 
     def _tune(relpath):
-        path = resolve_tune(relpath, cache_dir=TUNE_CACHE)
+        path = resolve_tune(relpath)
         if path is None:
             pytest.skip(f"{relpath} unavailable (offline, not cached)")
         return Path(path)
@@ -81,11 +79,11 @@ def jump_tune_path(tune):
 def _native(name: str) -> Path:
     """A committed-pin native fixture from the cache; skip when it is absent."""
     entry = {e.name: e for e in load_manifest(NATIVE_MANIFEST)}[name]
-    path = native_fixture(entry.sha256, NATIVE_CACHE)
+    path = native_fixture(entry.sha256, default_native_cache())
     if path is None:
         pytest.skip(
             f"native fixture {name!r} not cached; run pysidtracker fixtures fetch "
-            "tests/fixtures/ma_native.txt --cache tests/.native"
+            "tests/fixtures/ma_native.txt"
         )
     return path
 

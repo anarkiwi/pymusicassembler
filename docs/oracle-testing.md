@@ -12,7 +12,7 @@ against the [`sidtrace`](https://github.com/anarkiwi/sidtrace) oracle — a patc
    committed.
 2. **Render the oracle** with the `anarkiwi/sidtrace` image, which streams a
    zstd CSV of every changed SID write annotated with cycle/interrupt timing.
-   The CSV is cached per tune (`.oracle-cache/csv`).
+   The CSV is cached per tune (`.tunecache/csv`).
 3. **Frame** the CSV into a per-frame 25-register grid; the cadence is the
    median interrupt-raise interval taken from the CSV itself.
 4. **Compare** `oracle_hvsc.render(data, 1, ...)` (the survey renderer) against
@@ -47,7 +47,7 @@ reader cannot decode raises `MusicAssemblerParseError` (a
 `pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
 ```bash
-pip install "pysidtracker[survey]>=0.29.0"
+pip install "pysidtracker[survey]>=0.30.0"
 python -m pysidtracker.survey find $HVSC --player '^\(?music_assembler(/mc)?\)?$' --out .hvsc-survey/tunes.csv
 PYTHONPATH=scripts python -m pysidtracker.survey run $HVSC .hvsc-survey/tunes.csv \
     --work .hvsc-survey --render oracle_hvsc:render --jobs 16
