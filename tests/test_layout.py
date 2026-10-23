@@ -39,6 +39,8 @@ SPACE = {
     "sweep_sta": 0x129E,
     "program_acc": 0x129E,
     "sid": 0xD400,
+    "res_sid": 0xD400,
+    "fc_sid": 0xD400,
     "res_presets": 0x12B3,
     "voice_reg": 0x10C6,
     "arp": 0x12C3,
@@ -177,3 +179,34 @@ def test_pulse_mode_branch(tune_path):
     )
     image.poke(at.addr + 12, 0)
     assert layout.discover(image, lay.entry).pulse_always
+
+
+def test_vibrato_output_cells_are_read_from_the_output_routine(tune_path):
+    """A note routine storing its vibrato start elsewhere leaves the output's cells."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(image, Player(reader.read(tune_path)).layout.entry)
+    assert (lay.vib_out_lo, lay.vib_out_hi) == (lay.vib_freq_lo, lay.vib_freq_hi)
+    at = image.find_code(
+        CodePattern(f"9D {lay.vib_freq_lo & 0xFF:02X} {lay.vib_freq_lo >> 8:02X} B9"),
+        start=lay.entry,
+    )
+    image.poke(at.addr + 2, 0x01)
+    patched = layout.discover(image, lay.entry)
+    assert patched.vib_freq_lo == (lay.vib_freq_lo & 0xFF) | 0x0100
+    assert (patched.vib_out_lo, patched.vib_out_hi) == (lay.vib_out_lo, lay.vib_out_hi)
+
+
+def test_filter_stores_keep_their_own_sid_page(tune_path):
+    """A build buffering the voice registers still stores the filter on the chip."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(
+        image, Player(reader.parse(tune_path.read_bytes())).layout.entry
+    )
+    for pattern in ("99 06 {page}", "99 05 {page}", "99 04 {page}"):
+        at = image.find_code(CodePattern(pattern), start=lay.entry)
+        image.poke(at.addr + 2, 0x1C)
+    moved = layout.discover(image, lay.entry)
+    assert (moved.sid, moved.res_sid, moved.fc_sid) == (0x1C00, lay.sid, lay.sid)
+    at = image.find_code(CodePattern("8D 16 {page}"), start=lay.entry)
+    image.poke(at.addr + 2, 0xD5)
+    assert layout.discover(image, lay.entry).fc_sid == 0xD500

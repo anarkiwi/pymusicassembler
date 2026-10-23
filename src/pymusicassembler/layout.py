@@ -47,7 +47,7 @@ _ROUTINES = (
         "to_filter",
         "8E {filter_owner:w} C8 B1 ?? 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
         " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 ?? 17 ?? ?? 09 8D {fc_ctr_reset:w}"
-        " BD {res_presets:w} 8D 17 ?? A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
+        " BD {res_presets:w} 8D 17 {res_sid} A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
         " 9D {arp_substep:w} 9D {arp_phase:w}",
     ),
     (
@@ -68,7 +68,7 @@ _ROUTINES = (
     (
         "to_sustain",
         "EC {sweep_owner:w} D0 12 A9 {at_sweep_ctr} F0 0E CE {sweep_dec:w} 18"
-        " A9 {at_sweep_acc} 69 {at_sweep_step} 8D {sweep_sta:w} 8D 16 ??"
+        " A9 {at_sweep_acc} 69 {at_sweep_step} 8D {sweep_sta:w} 8D 16 {fc_sid}"
         " B5 ?? 29 0F F0 {to_arp} 20 {program:w}",
     ),
     ("to_sustain_end", "A4 ?? B9 ?? ?? 85 ?? B5 ?? 29 40 F0 {to_pulse_sweep}"),
@@ -92,6 +92,13 @@ _INIT = CodePattern(
 
 # Work cell holding the orderlist transrep byte, distinct from the transpose read cell.
 TRANSREP_BYTE = CodePattern("9D {cell:w} 29 0F 9D {repeat:w}")
+
+# The output routine's vibrato step: the accumulators it adds the note's steps to
+# (``vib_freq_lo``/``hi`` but for builds whose note routine stores elsewhere).
+VIB_OUT = CodePattern(
+    "BD {step:w} 29 01 F0 ?? BD {toggle:w} 49 FF 9D ?? ?? D0 ?? 18 BD {lo:w}"
+    " 7D ?? ?? 9D ?? ?? 99 00 ?? BD {hi:w}"
+)
 
 # Optional commands later builds decode: (feature, pattern, captured cell that
 # must equal the named Layout cell, so a match belongs to this player instance).
@@ -152,6 +159,8 @@ class Layout:
     note_ctl: int
     vib_lo_step: int
     vib_hi_step: int
+    vib_out_lo: int
+    vib_out_hi: int
     filter_owner: int
     fc_acc_reset: int
     fc_step: int
@@ -187,6 +196,8 @@ class Layout:
     inner_hi: int
     pitch_skip: int
     sid: int
+    res_sid: int
+    fc_sid: int
     order_tempo: bool = False
     order_jump: bool = False
     program_jump: int = 0
@@ -338,7 +349,8 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
         found[f"{at}_end"] = addr + pattern.length
     found["tempo_reload"] = found["to_reload"] + 1
     found["pulse_always"] = found["to_pulse_sweep"] == found["to_sustain_end_end"]
-    found["sid"] <<= 8
+    for page in ("sid", "res_sid", "fc_sid"):
+        found[page] <<= 8
     if found["pitch_skip"] not in (0, 4):
         raise MusicAssemblerParseError("player signatures not found (pitch_skip)")
     inits = find_code_all(image, _INIT, start=start, end=end)
@@ -362,5 +374,14 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
             break
     else:
         found["transrep_byte"] = found["transrep"]
+    found["vib_out_lo"], found["vib_out_hi"] = next(
+        (
+            (m.captures["lo"], m.captures["hi"])
+            for m in find_code_all(image, VIB_OUT, start=start, end=end)
+            if (m.captures["step"], m.captures["toggle"])
+            == (found["vib_lo_step"], found["vib_toggle"])
+        ),
+        (found["vib_freq_lo"], found["vib_freq_hi"]),
+    )
     found["output_voices"] = _output_voices(image, entry, found["output"])
     return Layout(**{f.name: found[f.name] for f in fields(Layout) if f.name in found})

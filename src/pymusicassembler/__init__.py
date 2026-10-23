@@ -43,7 +43,7 @@ from pymusicassembler.writer import (
     write_presets,
 )
 
-__version__ = "0.8.0"
+__version__ = "0.8.5"
 
 __all__ = [
     "Arpeggio",
