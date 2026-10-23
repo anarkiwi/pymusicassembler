@@ -1,1 +1,54 @@
-[]
+[
+  {
+    "compare": "lead",
+    "frames": 3130,
+    "id": "7574ce5b94ae",
+    "key": "('first', '6502:edge:12c37575af2fbdf351105b43', '')",
+    "kind": "first",
+    "left": "6502",
+    "md5": "d04e3a08efecdd74bda19f34ec2393e3",
+    "reason": "$132D BEQ $1343 -> $1343: reference frame 3121, register $02 v1_pw_lo",
+    "relpath": "MUSICIANS/T/Trident/Mindbender.sid",
+    "right": "format:musicassembler",
+    "song": 1
+  },
+  {
+    "compare": "lead",
+    "frames": 9897,
+    "id": "9fa900e38eb3",
+    "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._frame:156>159')",
+    "kind": "first",
+    "left": "6502",
+    "md5": "728dff7223f47527803bdf8b35380d8f",
+    "reason": "pymusicassembler/player.py:156 if self._hosted is not None: -> 159: reference frame 9888, register $17 res_filt",
+    "relpath": "MUSICIANS/W/Wells_Jon/Project_Argus_End.sid",
+    "right": "format:musicassembler",
+    "song": 1
+  },
+  {
+    "compare": "lead",
+    "frames": 780,
+    "id": "af8bc373db0f",
+    "key": "('first', '6502:edge:a27d937a256fbb98e9d8e382', '')",
+    "kind": "first",
+    "left": "6502",
+    "md5": "604b4485db7f3852f544864b26c5d5ff",
+    "reason": "$134C BEQ $135e -> $134E: reference frame 771, register $02 v1_pw_lo",
+    "relpath": "MUSICIANS/S/Siebold_Markus/Vivian_Co-op_Demo_tune_1.sid",
+    "right": "format:musicassembler",
+    "song": 1
+  },
+  {
+    "compare": "lead",
+    "frames": 5442,
+    "id": "e7463fd9973b",
+    "key": "('first', '6502:edge:07e87d91983cf8595d7d5f90', '')",
+    "kind": "first",
+    "left": "6502",
+    "md5": "b52c3e8d90e72ec8db24e9a914bc838f",
+    "reason": "$544C BEQ $545e -> $545E: reference frame 5433, register $10 v3_pw_lo",
+    "relpath": "MUSICIANS/T/The_Blue_Ninja/Holiday_Dream_91_Endpart.sid",
+    "right": "format:musicassembler",
+    "song": 1
+  }
+]
