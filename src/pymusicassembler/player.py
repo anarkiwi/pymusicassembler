@@ -424,7 +424,7 @@ class Player(EmuPlayer):
         lay = self._lay
         speed = self._rd(rec + constants.INSTR_PULSE_STEP)
         lo, hi = lay.pw_lo + v, lay.pw_hi + v
-        if flags & 0x40:
+        if flags & 0x40 or lay.pulse_always:
             carry = (self._rd(lo) + speed) >> 8
             self._inc(lo, speed)
             self._inc(hi, speed + carry)

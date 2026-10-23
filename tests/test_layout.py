@@ -2,7 +2,7 @@
 
 import pytest
 
-from pysidtracker import SidImage
+from pysidtracker import CodePattern, SidImage
 
 from pymusicassembler import Player, layout, reader
 from pymusicassembler.errors import MusicAssemblerParseError
@@ -164,3 +164,16 @@ def test_routines_are_followed_through_jmp_trampolines(tune_path):
     mem[0xF000:0xF006] = bytes((0x4C, 0x03, 0xF0, 0x4C, advance & 0xFF, advance >> 8))
     mem[call : call + 2] = bytes((0x00, 0xF0))
     assert layout.discover(mem, lay.entry) == lay
+
+
+def test_pulse_mode_branch(tune_path):
+    """A build whose ``AND #$40; BEQ`` falls through always adds the pulse step."""
+    data = bytearray(tune_path.read_bytes())
+    image = SidImage.from_bytes(bytes(data))
+    lay = layout.discover(image, Player(reader.parse(bytes(data))).layout.entry)
+    assert not lay.pulse_always
+    at = image.find_code(
+        CodePattern("A4 ?? B9 ?? ?? 85 ?? B5 ?? 29 40 F0"), start=lay.entry
+    )
+    image.poke(at.addr + 12, 0)
+    assert layout.discover(image, lay.entry).pulse_always
