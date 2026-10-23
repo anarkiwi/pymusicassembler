@@ -6,8 +6,7 @@
 
 import numpy as np
 
-from pysidtracker.cadence import playroutine_cadence
-from pysidtracker.registers import PAL_CYCLES_PER_FRAME
+from pysidtracker.cadence import cadence_info
 
 from pymusicassembler import Player, parse
 from pymusicassembler.constants import DEFAULT_LOAD, NATIVE_PLAY_OFFSET
@@ -22,14 +21,11 @@ def render(data, song, nframes):
     """Render 1-based ``song`` of a Music Assembler ``.sid`` and the build it decoded."""
     tune = parse(data)
     player = Player(tune, subtune=song - 1)
-    cadence = playroutine_cadence(data, subtune=song - 1)
     info = {
         "load_offset": tune.load_addr - player.base,
         "relocated": player.base != STANDARD_BASE,
         "tempo": player.tempo_reload,
         "features": "+".join(f for f in FEATURES if getattr(player.layout, f)),
-        "rsid": data[:4] == b"RSID",
-        "trigger": cadence.source and cadence.source.value,
-        "speed": round(PAL_CYCLES_PER_FRAME / cadence.cycles_per_call),
     }
+    info.update(cadence_info(data, song))
     return np.asarray(player.render_grid(nframes), np.int16), info

@@ -235,3 +235,7 @@ tests/.native/
 
 # Local git worktrees for PR work.
 .worktrees/
+
+# process core dumps
+core.[0-9]*
+/core

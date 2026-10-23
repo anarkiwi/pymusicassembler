@@ -4,6 +4,7 @@ import csv
 import json
 
 import survey_sample
+from pysidtracker import survey
 
 
 def _write(path, rows):
@@ -53,15 +54,17 @@ def test_sample_classes_copies_traces_and_tallies(tmp_path, capsys):
     assert sorted(p.name for p in (dst / "oracle").iterdir()) == sorted(
         ["STAMP"] + [f"{m}_1.csv.zst" for m in spec]
     )
+    classes = {f.stem: f.read_text().split() for f in (dst / "classes").iterdir()}
+    assert classes == {
+        "not_decompiled": ["e_1"],
+        "base_null": ["b_1"],
+        "tempo": ["a_1"],
+        "fc": ["c_1"],
+        "exact": ["d_1"],
+    }
     results[0]["verdict"] = "exact"
     _write(tmp_path / "after.csv", results)
-    survey_sample.main([str(dst), "--tally", str(tmp_path / "after.csv")])
-    out = dict(line.split(None, 1) for line in capsys.readouterr().out.splitlines())
-    assert out == {
-        "not_decompiled": "0 /    1",
-        "base_null": "0 /    1",
-        "tempo": "1 /    1",
-        "fc": "0 /    1",
-        "exact": "1 /    1",
-        "total": "2 /    5",
-    }
+    survey.main(
+        ["compare", str(tmp_path / "after.csv"), str(dst / "classes" / "tempo.txt")]
+    )
+    assert "tempo.txt: 1 {'exact': 1}" in capsys.readouterr().out

@@ -11,7 +11,7 @@ from pathlib import Path
 import oracle_hvsc
 import pytest
 
-from pysidtracker import SidImage, make_oracle_fixtures
+from pysidtracker import make_oracle_fixtures, start_subtune
 
 _CACHE = Path(os.environ.get("PYMUSICASSEMBLER_ORACLE_CACHE", ".oracle-cache"))
 _MAX_LEAD = 4
@@ -48,7 +48,7 @@ SECONDS = 101
 
 
 def _render(data, nframes):
-    song = SidImage.from_bytes(data).header.start_song
+    song = start_subtune(data) + 1
     return oracle_hvsc.render(data, song, nframes + _MAX_LEAD)[0].tolist()
 
 

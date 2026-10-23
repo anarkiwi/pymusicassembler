@@ -1,11 +1,14 @@
-"""Shared test fixtures: HVSC tune access.
+"""Shared test fixtures: HVSC tune and editor native-file access.
 
 Tunes are HVSC copyright works, never committed.  ``tune_path`` (built by the
-shared :func:`pysidtracker.testing.make_tune_fixtures`) resolves a tune from a
-local ``$HVSC`` tree or the gitignored cache, fetching from the mirror on demand
-and skipping the test when it is unavailable offline.  The byte-exact oracle
-comparison lives in :mod:`tests.test_oracle_hvsc` (marker ``oracle``), which
-reuses :func:`pysidtracker.testing.make_oracle_fixtures`.
+shared :func:`pysidtracker.testing.make_tune_fixtures`) and ``tune`` resolve a
+tune from a local ``$HVSC`` tree or the gitignored cache, fetching from the
+mirror on demand and skipping the test when it is unavailable offline.  The
+editor's ``P.``/``S.`` files are pinned by SHA-256 in
+``tests/fixtures/ma_native.txt`` and cached by
+``pysidtracker fixtures fetch tests/fixtures/ma_native.txt --cache tests/.native``.
+The byte-exact oracle comparison lives in :mod:`tests.test_oracle_hvsc` (marker
+``oracle``), which reuses :func:`pysidtracker.testing.make_oracle_fixtures`.
 """
 
 import os
@@ -16,43 +19,63 @@ import pytest
 
 from pysidtracker import fixture as native_fixture
 from pysidtracker import load_manifest
-from pysidtracker.testing import make_tune_fixtures
+from pysidtracker.testing import make_tune_fixtures, resolve_tune
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
-import fetch_tunes  # noqa: E402  (after sys.path tweak)
-
-# Editor native fixtures: SHA-256 pins in tests/fixtures/ma_native.txt, files cached gitignored by scripts/fetch_native.py.
+TUNE_CACHE = Path(os.environ.get("MA_TUNECACHE", str(REPO / "tests" / ".tunecache")))
 NATIVE_MANIFEST = REPO / "tests" / "fixtures" / "ma_native.txt"
 NATIVE_CACHE = Path(os.environ.get("MA_NATIVECACHE", str(REPO / "tests" / ".native")))
 
-# Parametrized ``tune_id`` / ``tune_path`` fixtures over the Music Assembler
-# test tunes, resolving via the shared local-tree/cache/mirror logic.
-tune_id, tune_path = make_tune_fixtures(fetch_tunes.TUNES, fetch_tunes.CACHE)
+# id -> HVSC relative path.  Space Invadarz on Vacation is the decompile
+# reference; 7 Years and 3LUX Intro exercise per-tune table relocation and the
+# self-modified filter envelope.
+TUNES = {
+    "space": "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid",
+    "7years": "DEMOS/0-9/7_Years.sid",
+    "3lux": "DEMOS/0-9/3LUX_Intro.sid",
+}
 
-
-def _fetch_or_skip(relpath):
-    try:
-        return fetch_tunes.fetch(relpath)
-    except Exception as exc:  # pylint: disable=broad-except
-        pytest.skip(f"tune unavailable: {exc}")
-
-
-@pytest.fixture
-def later_tune_path():
-    """A later-build tune (see ``fetch_tunes.LATER_TUNE``)."""
-    return _fetch_or_skip(fetch_tunes.LATER_TUNE)
+tune_id, tune_path = make_tune_fixtures(TUNES, TUNE_CACHE)
 
 
 @pytest.fixture
-def native_tune_path():
-    """A tune whose image is a native self-start song (see fetch_tunes).
+def tune():
+    """``tune(relpath)``: the tune's local path; skips when it is unreachable."""
 
-    Fetched on demand into the gitignored cache; skipped when unavailable
-    offline, mirroring the shared ``tune_path`` fixture.
-    """
-    return _fetch_or_skip(fetch_tunes.NATIVE_TUNE)
+    def _tune(relpath):
+        path = resolve_tune(relpath, cache_dir=TUNE_CACHE)
+        if path is None:
+            pytest.skip(f"{relpath} unavailable (offline, not cached)")
+        return Path(path)
+
+    return _tune
+
+
+@pytest.fixture
+def later_tune_path(tune):
+    """A later build (init before play; orderlist $FC/$FD and wave-program $FD)."""
+    return tune("MUSICIANS/C/Cooper/Song.sid")
+
+
+@pytest.fixture
+def native_tune_path(tune):
+    """A native editor song wrapped in a PSID: its image carries the self-start
+    stub verbatim (``78 20 48 50 ...`` at load $5000)."""
+    return tune("DEMOS/A-F/Barbara.sid")
+
+
+@pytest.fixture
+def silence_tune_path(tune):
+    """A tune parked on the single-byte $FE silence terminator (#24)."""
+    return tune("MUSICIANS/F/Feekzoid/Another_Feekzoid_Digi_Tune.sid")
+
+
+@pytest.fixture
+def jump_tune_path(tune):
+    """A later build whose orderlists all end on a $FD n jump (#24)."""
+    return tune("DEMOS/M-R/Raccoon_intro.sid")
 
 
 def _native(name: str) -> Path:
@@ -60,7 +83,10 @@ def _native(name: str) -> Path:
     entry = {e.name: e for e in load_manifest(NATIVE_MANIFEST)}[name]
     path = native_fixture(entry.sha256, NATIVE_CACHE)
     if path is None:
-        pytest.skip(f"native fixture {name!r} not cached; run scripts/fetch_native.py")
+        pytest.skip(
+            f"native fixture {name!r} not cached; run pysidtracker fixtures fetch "
+            "tests/fixtures/ma_native.txt --cache tests/.native"
+        )
     return path
 
 
@@ -74,15 +100,3 @@ def preset_bank_path():
 def shape_song_path():
     """The release ``S.FOR SHAPE`` song on the same disk as ``P.``."""
     return _native("S.FOR SHAPE")
-
-
-@pytest.fixture
-def silence_tune_path():
-    """A tune parked on the single-byte $FE silence terminator (#24)."""
-    return _fetch_or_skip(fetch_tunes.SILENCE_TUNE)
-
-
-@pytest.fixture
-def jump_tune_path():
-    """A tune whose orderlists end on a $FD n jump (#24)."""
-    return _fetch_or_skip(fetch_tunes.JUMP_TUNE)

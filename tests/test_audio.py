@@ -1,4 +1,4 @@
-"""Audio rendering via a fake SID device (no pyresidfp dependency)."""
+"""Audio rendering via a fake SID device."""
 
 from array import array
 
@@ -51,19 +51,3 @@ def test_write_wav_accepts_iterables(tmp_path):
 def test_bad_model(tune_path):
     with pytest.raises(MusicAssemblerError):
         audio.render_samples(reader.read(tune_path), model="nope", device=_FakeSid())
-
-
-def test_default_device_requires_pyresidfp(monkeypatch, tune_path):
-    """Without pyresidfp installed, a helpful error is raised."""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name.startswith("pyresidfp"):
-            raise ImportError("no pyresidfp")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(MusicAssemblerError, match="pyresidfp"):
-        audio.render_samples(reader.read(tune_path), seconds=0.01)

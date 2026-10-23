@@ -1,8 +1,9 @@
 """Stratified sample of a ``pysidtracker.survey`` run, by failure class.
 
 ``survey_sample.py SRC DST [--per-class N]`` copies whole tunes' cached oracle
-traces per class into ``DST``; ``survey_sample.py DST --tally RESULTS`` prints
-exact/total per class of a later ``results.csv``.
+traces per class into ``DST`` and writes each class's subtune keys to
+``DST/classes/<class>.txt``, so ``python -m pysidtracker.survey compare RESULTS
+DST/classes/*.txt`` tallies a later ``results.csv`` per class.
 """
 
 import argparse
@@ -13,6 +14,7 @@ import shutil
 from collections import Counter, defaultdict
 from pathlib import Path
 
+from pysidtracker.survey import load_tunes, read_results
 from tqdm import tqdm
 
 
@@ -50,17 +52,12 @@ def classify(results, triage):
     return out
 
 
-def _read(path):
-    with open(path, newline="", encoding="utf-8") as f:
-        return list(csv.DictReader(f))
-
-
 def sample(src, dst, per_class, seed):
     """Write the sample under ``dst``; return ``{key: class}`` for its subtunes."""
     src, dst = Path(src), Path(dst)
-    tunes = {t["md5"]: t for t in _read(src / "tunes.csv")}
-    triage = {t["key"]: t for t in _read(src / "triage.csv")}
-    classes = classify(_read(src / "results.csv"), triage)
+    tunes = {t["md5"]: t for t in load_tunes(src / "tunes.csv")}
+    triage = read_results(src / "triage.csv")
+    classes = classify(read_results(src / "results.csv").values(), triage)
     by_class = defaultdict(set)
     for key, cls in classes.items():
         by_class[cls].add(key.rsplit("_", 1)[0])
@@ -90,41 +87,23 @@ def sample(src, dst, per_class, seed):
                 trace = src / "oracle" / f"{key}.csv.zst"
                 if trace.exists():
                     shutil.copy(trace, dst / "oracle" / trace.name)
-    with open(dst / "classes.csv", "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["key", "class"])
-        w.writerows(sorted(keys.items()))
+    by_key = defaultdict(list)
+    for key, cls in sorted(keys.items()):
+        by_key[cls].append(key)
+    (dst / "classes").mkdir(exist_ok=True)
+    for cls, members in by_key.items():
+        (dst / "classes" / f"{cls}.txt").write_text("\n".join(members) + "\n", "utf-8")
     return keys
 
 
-def tally(classes_csv, results_csv):
-    """``{class: [exact, total]}`` for a results CSV over a sample's classes."""
-    classes = {r["key"]: r["class"] for r in _read(classes_csv)}
-    out = defaultdict(lambda: [0, 0])
-    for row in _read(results_csv):
-        if row["key"] in classes:
-            out[classes[row["key"]]][0] += row["verdict"] == "exact"
-            out[classes[row["key"]]][1] += 1
-    return dict(out)
-
-
 def main(argv=None):
-    """Sample, or with ``--tally`` report per-class exact counts."""
+    """Write the sample and print its subtune count per class."""
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("src", help="source survey work dir (sample dir with --tally)")
-    ap.add_argument("dst", nargs="?", help="destination work dir")
+    ap.add_argument("src", help="source survey work dir")
+    ap.add_argument("dst", help="destination work dir")
     ap.add_argument("--per-class", type=int, default=30)
     ap.add_argument("--seed", type=int, default=15)
-    ap.add_argument("--tally", help="results.csv to tally against SRC/classes.csv")
     args = ap.parse_args(argv)
-    if args.tally:
-        counts = tally(Path(args.src) / "classes.csv", args.tally)
-        for cls, _ in CLASSES:
-            if cls in counts:
-                print(f"{cls:16} {counts[cls][0]:4d} / {counts[cls][1]:4d}")
-        total = [sum(v[i] for v in counts.values()) for i in (0, 1)]
-        print(f"{'total':16} {total[0]:4d} / {total[1]:4d}")
-        return
     print(Counter(sample(args.src, args.dst, args.per_class, args.seed).values()))
 
 

@@ -41,13 +41,13 @@ reports the decoded build: `load_offset` (image load address minus the nominal
 player base, the play entry less `$21`: `0`, or `33` for a rip starting at the
 play routine), `relocated` (base other than `$1000`), `tempo` (the play-call
 divider reload after init), `features` (the build's `order_tempo`,
-`order_jump` and `program_jump` commands), `rsid`, and the play `trigger` and
-`speed` (calls per PAL frame, from `pysidtracker.playroutine_cadence`). A tune the
+`order_jump` and `program_jump` commands), and `pysidtracker.cadence_info`'s
+`rsid`, play `trigger`, `speed` (calls per PAL frame) and `dynamic`. A tune the
 reader cannot decode raises `MusicAssemblerParseError` (a
 `pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
 ```bash
-pip install "pysidtracker[survey]>=0.13.0"
+pip install "pysidtracker[survey]>=0.29.0"
 python -m pysidtracker.survey find $HVSC --player '^\(?music_assembler(/mc)?\)?$' --out .hvsc-survey/tunes.csv
 PYTHONPATH=scripts python -m pysidtracker.survey run $HVSC .hvsc-survey/tunes.csv \
     --work .hvsc-survey --render oracle_hvsc:render --jobs 16
@@ -63,7 +63,9 @@ Helpers for working through a survey:
 
 - `scripts/survey_sample.py SRC DST --per-class N` copies a stratified sample
   (whole tunes per failure class, with their cached oracle traces) into `DST`
-  for a quick `survey run`; `--tally RESULTS` reports exact/total per class.
+  for a quick `survey run`, with each class's keys in `DST/classes/<class>.txt`;
+  `python -m pysidtracker.survey compare RESULTS DST/classes/*.txt` tallies a
+  later run's verdicts per class.
 - `scripts/layout_census.py HVSC tunes.csv` tallies which player builds
   `pymusicassembler.layout` finds, statically and after init.
 - the shared `pysidtracker disasm TUNE.sid [START [END]]` command
