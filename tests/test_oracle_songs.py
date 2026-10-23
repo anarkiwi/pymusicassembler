@@ -38,6 +38,8 @@ TUNES = {
     "self_modified_call": "MUSICIANS/K/Kaiser_Cameron/Nether_preview.sid",
     # Two player instances each frame, the second on a second SID.
     "two_players": "MUSICIANS/J/JVD/Double_2SID.sid",
+    # RSID, play 0: a raster IRQ plays the music beside an NMI $D418 digi.
+    "irq_digimix": "MUSICIANS/A/Albartus_Jan/Play_the_Mix.sid",
 }
 
 # At least the longest HVSC song length of TUNES, in seconds.

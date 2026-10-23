@@ -61,7 +61,10 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
   and arpeggios (the editor's "play back with different preset banks").
 - `build(song) -> bytes` — the raw C64 image; `build_native(song) -> bytes` —
   the native self-starting image body; `validate(song)`.
-- `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`.
+- `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`. A `.sid`
+  with play address 0 plays every interrupt its init installs (raster, CIA
+  IRQs, NMI digis, a main loop) on `pysidtracker.irqhost.InterruptPlayer`,
+  one frame per play-source raise as the oracle frames it.
 - `formats.MUSIC_ASSEMBLER` — the `musicassembler` `pysidtracker.SidFormat`
   (entry point `pysidtracker.formats`), so `pysidtracker info|reglog|wav` play
   Music Assembler tunes and `format:musicassembler` names this player in

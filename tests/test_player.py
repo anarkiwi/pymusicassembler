@@ -11,7 +11,9 @@ from dataclasses import replace
 import pytest
 
 from pysidtracker import power_on_ram
+from pysidtracker.asm6502 import assemble
 from pymusicassembler import constants, reader
+from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.player import Player, iter_frames, render_grid
 
 NREG = 25
@@ -371,3 +373,57 @@ def test_registers_are_written_to_the_players_sid(tune_path):
     player._wr(0xD404, 0x00)
     player._set(constants.CTRL_REG, 0x41)
     assert player._rd(0xD504) == 0x41 and player.snapshot()[4] == 0x00
+
+
+def _rsid(song, irq="CLI"):
+    """``song`` as an RSID (play 0) whose init installs a KERNAL IRQ calling play."""
+    init, entry = song.init_addr, Player(song).layout.entry
+    org = song.load_addr + len(song.image)
+    code, _ = assemble(
+        f"""
+  JSR ${init:04X}
+  SEI
+  LDA #<irq
+  STA $0314
+  LDA #>irq
+  STA $0315
+  {irq}
+  RTS
+irq: JSR ${entry:04X}
+  JMP $EA31
+""",
+        org,
+    )
+    header = bytearray(song.container_header)
+    header[:4] = b"RSID"
+    header[0x0A:0x0E] = bytes((org >> 8, org & 0xFF, 0, 0))
+    song.container_header = bytes(header)
+    song.image = bytes(song.image) + code
+    song.init_addr, song.play_addr = org, 0
+    return song
+
+
+def _changes(grid):
+    return [row for i, row in enumerate(grid) if not i or row != grid[i - 1]]
+
+
+def test_rsid_plays_on_its_installed_interrupt(tune_path):
+    direct = render_grid(reader.read(tune_path), 40)
+    player = Player(_rsid(reader.read(tune_path)))
+    assert _changes(player.render_grid(40)) == _changes(direct)
+    assert player._hosted.host.framed[0] == "cia_irq"
+
+
+def test_rsid_frames_continue_after_a_grid(tune_path):
+    song = _rsid(reader.read(tune_path))
+    grid = Player(song).render_grid(12)
+    player = Player(song)
+    player.render_grid(6)
+    assert [player.play_frame() is not None for _ in range(6)] == [True] * 6
+    assert player.snapshot() == grid[-1]
+
+
+def test_rsid_without_an_interrupt_is_a_parse_error(tune_path):
+    player = Player(_rsid(reader.read(tune_path), irq="LDA #$7F\n  STA $DC0D"))
+    with pytest.raises(MusicAssemblerParseError, match="no interrupt"):
+        player.render_grid(4)

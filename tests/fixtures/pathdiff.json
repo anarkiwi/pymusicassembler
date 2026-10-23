@@ -37,18 +37,5 @@
   "relpath": "DEMOS/A-F/Ciabah_1_magazine.sid",
   "right": "format:musicassembler",
   "song": 1
- },
- {
-  "compare": "lead",
-  "frames": 9,
-  "id": "fcd84d8248c2",
-  "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._note:222>225')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "256544232ef1915253fbce8a69d6f020",
-  "reason": "pymusicassembler/player.py:222 if res == 0: -> 225: reference frame 0, register $17 res_filt",
-  "relpath": "DEMOS/G-L/Lander-Lunacy_4_Digimix.sid",
-  "right": "format:musicassembler",
-  "song": 1
  }
 ]

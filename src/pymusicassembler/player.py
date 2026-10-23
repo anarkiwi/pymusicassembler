@@ -3,14 +3,19 @@
 The tune's own init runs in the 6502 emulator as the PSID driver boots it
 (power-on RAM, PAL/NTSC flag, banking; selecting the subtune and placing any
 relocated data); the play call is then modelled in Python on the player's work
-cells, at the addresses :mod:`pymusicassembler.layout` finds.
+cells, at the addresses :mod:`pymusicassembler.layout` finds. A SID with play
+address 0 drives the player from the interrupts its init installs (with any
+digi on another source or a main loop), so it plays on pysidtracker's
+:class:`~pysidtracker.irqhost.InterruptPlayer`, framed at its play source's
+raises as the oracle is.
 """
 
 from typing import List, Optional, Set
 
 from pysidtracker import PSID_MAGIC, RSID_MAGIC, EmuPlayer, parse_sid_header
 from pysidtracker import psid_init_bank, psid_play_bank, run_to_rts, set_iomap
-from pysidtracker import wire_mpu
+from pysidtracker import SidParseError, wire_mpu
+from pysidtracker.irqhost import InterruptPlayer
 from pysidtracker.oracle import PAL_FLAG
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
 from pysidtracker.registers import RES_FILT, SR, sid_model_for_flags
@@ -39,6 +44,9 @@ class Player(EmuPlayer):
         sid = song.container_header[:4] in (PSID_MAGIC, RSID_MAGIC)
         header = parse_sid_header(song.container_header) if sid else None
         self._psid = header is None or header.is_psid
+        self._hosted: Optional[InterruptPlayer] = None
+        if header is not None and not song.play_addr:
+            self._hosted = InterruptPlayer(song.container_header + song.image, subtune)
         super().__init__(
             song.image,
             song.load_addr,
@@ -140,11 +148,28 @@ class Player(EmuPlayer):
 
     # -- one play call -----------------------------------------------------
     def _frame(self) -> None:
+        if self._hosted is not None:
+            self._hosted.play_frame()
+            return
         play = self._song.play_addr
         if play in (0, self.layout.entry):
             self._play(self.layout)
         else:
             self._call(play)
+
+    def snapshot(self) -> List[int]:
+        if self._hosted is None:
+            return super().snapshot()
+        return self._hosted.snapshot()
+
+    def render_grid(self, nframes: int) -> List[List[int]]:
+        """``nframes`` rows; a hosted tune's are framed at its play source's raises."""
+        if self._hosted is None:
+            return super().render_grid(nframes)
+        try:
+            return self._hosted.render_grid(nframes)
+        except SidParseError as exc:
+            raise MusicAssemblerParseError(str(exc)) from exc
 
     def _probe(self, play: int) -> Optional[layout.Layout]:
         """The player instance the play routine calls first, leaving no trace."""
