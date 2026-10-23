@@ -313,6 +313,23 @@ def test_player_under_a_banked_out_rom_is_modelled(tune_path):
     assert player.memory[0xE021 : 0xE021 + len(body)] == body
 
 
+@pytest.mark.parametrize(
+    "magic, play, bits", [(b"PSID", None, 7), (b"RSID", None, 6), (b"PSID", 0, 6)]
+)
+def test_play_banks_the_cpu_port_as_psiddrv(tune_path, magic, play, bits):
+    """psiddrv banks ``$01`` for play only for a PSID with a play address."""
+    song = reader.read(tune_path)
+    init = song.init_addr
+    song = _wrapped(
+        song, lambda w: (0x20, init & 0xFF, init >> 8, 0xA9, 0x36, 0x85, 0x01, 0x60)
+    )
+    song.init_addr, song.play_addr = song.play_addr, Player(song).layout.entry
+    song.container_header = magic + bytes(song.container_header[4:])
+    if play is not None:
+        song.play_addr = play
+    assert Player(song)._bus.bits == bits
+
+
 def test_sweep_follows_its_own_operands(tune_path):
     player = Player(reader.read(tune_path))
     lay = player.layout

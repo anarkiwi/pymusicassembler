@@ -1,19 +1,6 @@
 [
  {
   "compare": "lead",
-  "frames": 9,
-  "id": "0e72531b8f64",
-  "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._play:153>154')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "93f3b7e4d05db4a139ac887ca0d9b2a0",
-  "reason": "pymusicassembler/player.py:153 if self._inc(lay.tempo, -1) < 0x80: -> 154: reference frame 0, register $00 v1_freq_lo",
-  "relpath": "MUSICIANS/W/Wells_Jon/Shaolin.sid",
-  "right": "format:musicassembler",
-  "song": 1
- },
- {
-  "compare": "lead",
   "frames": 16,
   "id": "12122a8ebfd7",
   "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._sid_final:389>401')",

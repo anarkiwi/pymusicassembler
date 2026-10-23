@@ -9,6 +9,9 @@ cells, at the addresses :mod:`pymusicassembler.layout` finds.
 from typing import List, Optional, Set
 
 from pysidtracker import PSID_MAGIC, RSID_MAGIC, EmuPlayer, parse_sid_header
+from pysidtracker import psid_init_bank, psid_play_bank, run_to_rts, set_iomap
+from pysidtracker import wire_mpu
+from pysidtracker.oracle import PAL_FLAG
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
 from pysidtracker.registers import RES_FILT, SR, sid_model_for_flags
 
@@ -35,6 +38,7 @@ class Player(EmuPlayer):
         self.layout: Optional[layout.Layout] = None
         sid = song.container_header[:4] in (PSID_MAGIC, RSID_MAGIC)
         header = parse_sid_header(song.container_header) if sid else None
+        self._psid = header is None or header.is_psid
         super().__init__(
             song.image,
             song.load_addr,
@@ -100,7 +104,7 @@ class Player(EmuPlayer):
 
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
-        super()._init(subtune)
+        self._boot(subtune)
         self._bus = self._obs._subject
         play = self._song.play_addr
         lay = self._probe(play) if play else None
@@ -110,6 +114,22 @@ class Player(EmuPlayer):
                 raise MusicAssemblerParseError("no play entry after init")
             lay = self._instance(entry)
         self.layout = self._lay = lay
+
+    def _boot(self, subtune: int) -> None:
+        """Run init as psiddrv does, banking ``$01`` only where it would.
+
+        An RSID tune boots under ``$37`` and, like a PSID whose init installs
+        its own interrupt (play 0), plays under the banking its init left
+        (``psiddrv::iomap`` 0).
+        """
+        if self._pal_flag is not None:
+            self._mem[PAL_FLAG] = self._pal_flag
+        self._mem[1] = psid_init_bank(self._init_addr) if self._psid else 0x37
+        self._mpu, self._obs = wire_mpu(self._mem, self._illegal, self._sid_model)
+        run_to_rts(self._mpu, self._obs, self._init_addr, subtune, self._max_cycles)
+        if self._psid and self._song.play_addr:
+            set_iomap(self._mpu, psid_play_bank(self._play_addr))
+        self._due = self._mpu.processorCycles
 
     def _instance(self, entry: int) -> layout.Layout:
         """The layout of the player instance whose play entry is ``entry``."""
