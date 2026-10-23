@@ -85,6 +85,11 @@ class Player(EmuPlayer):
         self._wr(addr, value)
         return value
 
+    def _indexed(self, at: int, index: int) -> int:
+        """The address an ``abs,X``/``abs,Y`` instruction reads: its operand at ``at``
+        (as the code holds it now) plus ``index``."""
+        return (self._rd(at) | (self._rd(at + 1) << 8)) + index
+
     def _rd(self, addr: int) -> int:
         return self._bus[addr & 0xFFFF]
 
@@ -369,31 +374,38 @@ class Player(EmuPlayer):
         if flags & 0x0F:
             self._program(v, flags & 0x0F)
         elif not ctl & constants.CTL_VIBARP and flags & 0x10:
-            self._arp(v, rec)
+            self._arp(v, rec - lay.instr)
         self._pulse(v, rec, self._rd(lay.flags + v))
 
-    def _arp(self, v: int, rec: int) -> None:
-        lay = self._lay
-        if self._inc(lay.porta_ctr + v, -1) < 0x80:
+    def _arp(self, v: int, x8: int) -> None:
+        lay, at = self._lay, self._indexed
+        if self._inc(at(lay.arp_porta_dec, v), -1) < 0x80:
             return
-        self._inc(lay.porta_ctr + v, 1)
-        step = self._rd(rec + constants.INSTR_ARP_STEP)
-        lo, hi = lay.freq_lo_w + v, lay.freq_hi_w + v
-        ascend = self._rd(lay.arp + (self._rd(lay.arp_phase + v) & 3))
+        self._inc(at(lay.arp_porta_inc, v), 1)
+        ascend = self._rd(lay.arp + (self._rd(at(lay.arp_phase_rd, v)) & 3))
         if not ascend:
-            borrow = self._rd(lo) < step
-            self._inc(lo, -step)
-            ascend = borrow and self._inc(hi, -1) == 0
+            step = self._rd(at(lay.arp_down_step, x8))
+            low = self._rd(at(lay.arp_down_src, v))
+            down = (low - step) & 0xFF
+            dst = at(lay.arp_down_dst, v)
+            if lay.arp_down_cmp:
+                carry = down >= self._rd(dst)
+            else:
+                carry = low >= step
+                self._wr(dst, down)
+            ascend = not carry and self._inc(at(lay.arp_down_hi, v), -1) == 0
         if ascend:
-            carry = self._rd(lo) + step > 0xFF
-            self._inc(lo, step)
-            if carry:
-                self._inc(hi, 1)
-        if self._inc(lay.arp_substep + v, 1) == (
-            self._rd(rec + constants.INSTR_ARP_SPEED) & 0x0F
+            step = self._rd(at(lay.arp_up_step, x8))
+            total = self._rd(at(lay.arp_up_src, v)) + step
+            self._wr(at(lay.arp_up_dst, v), total)
+            if total > 0xFF:
+                self._inc(at(lay.arp_up_hi, v), 1)
+        self._inc(at(lay.arp_substep_inc, v), 1)
+        if self._rd(at(lay.arp_speed, x8)) & 0x0F == self._rd(
+            at(lay.arp_substep_cmp, v)
         ):
-            self._wr(lay.arp_substep + v, 0)
-            self._inc(lay.arp_phase + v, 1)
+            self._wr(at(lay.arp_substep_clr, v), 0)
+            self._inc(at(lay.arp_phase_inc, v), 1)
 
     def _program(self, v: int, prog: int) -> None:
         lay = self._lay
