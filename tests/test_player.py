@@ -508,3 +508,41 @@ def test_duration_gates_the_parse_routines_own_cells(tune_path):
     assert (player._rd(FREE), player._rd(FREE + 3)) == (0x40, 0xFE)
     assert (player._rd(lay.ctrl), player._rd(lay.ctrl_mask)) == (0x41, 0xFF)
     assert player._rd(lay.dur) == 0x62 & constants.CTL_DUR_MASK
+
+
+def test_orderlist_end_and_restart_are_the_layouts(tune_path):
+    """The step restarts at the code's own index when it meets its own end marker."""
+    player = Player(reader.read(tune_path))
+    lay = player.layout = player._lay = replace(
+        player.layout, order_end=0x00, order_restart=4
+    )
+    _orderlist(player, 2, (0x07, 0x21, 0xFF, 0x00, 0x05, 0x13))
+    assert player._rd(lay.pattern_id + 2) == 0xFF
+    player._wr(lay.pat_cursor + 2, 0)
+    player._row_end(2, FREE + 0x80, -1)
+    assert player._rd(lay.order_cursor + 2) == 4
+    assert player._rd(lay.pattern_id + 2) == 0x05 and player._rd(lay.repeat + 2) == 3
+
+
+def test_order_commands_write_the_code_cells(later_tune_path):
+    """``$FC t`` and ``$FD n`` store into the cells the step's code names."""
+    player = Player(reader.read(later_tune_path))
+    lay = player.layout = player._lay = replace(
+        player.layout, order_tempo=(FREE + 0x40,), order_jump=FREE + 0x50
+    )
+    reload = player._rd(lay.tempo_reload)
+    _orderlist(player, 1, (0x07, 0x21, 0xFC, 0x05, 0xFD, 0x04, 0x00, 0x00, 0x09, 0x10))
+    assert player._rd(FREE + 0x40) == 5 and player._rd(lay.tempo_reload) == reload
+    assert player._rd(FREE + 0x51) == 8 and player._rd(lay.order_cursor + 1) == 8
+    assert player._rd(lay.pattern_id + 1) == 0x09
+
+
+def test_long_duration_stores_where_the_parse_routine_does(tune_path):
+    player = Player(reader.read(tune_path))
+    lay = player.layout = player._lay = replace(player.layout, dur_long=FREE)
+    pat = player._ptr(lay.pattern_lo, lay.pattern_hi, player._rd(lay.pattern_id))
+    _poke(player, pat, (0xA7, 0x00))
+    player._wr(lay.pat_cursor, 0)
+    player._wr(lay.dur, 0xFF)
+    player._parse(0)
+    assert (player._rd(FREE), player._rd(lay.dur)) == (7, 0xFF)
