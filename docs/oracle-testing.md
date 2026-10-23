@@ -47,7 +47,7 @@ reader cannot decode raises `MusicAssemblerParseError` (a
 `pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
 ```bash
-pip install "pysidtracker[survey]>=0.30.0"
+pip install "pysidtracker[survey]>=0.37.0"
 python -m pysidtracker.survey find $HVSC --player '^\(?music_assembler(/mc)?\)?$' --out .hvsc-survey/tunes.csv
 PYTHONPATH=scripts python -m pysidtracker.survey run $HVSC .hvsc-survey/tunes.csv \
     --work .hvsc-survey --render oracle_hvsc:render --jobs 16
@@ -72,6 +72,29 @@ Helpers for working through a survey:
   (`pysidtracker.disasm`, pysidtracker >= 0.15) disassembles a tune image, the
   tune's init/play entries labelled and `--after-init` the image state after
   init.
+
+## Pathdiff xfails
+
+`tests/test_pathdiff.py` (marked `oracle`) runs `tests/fixtures/pathdiff.json`: one
+strict xfail per top fix of [`pysidtracker.pathdiff`](https://github.com/anarkiwi/pysidtracker/blob/main/docs/pathdiff.md),
+the corpus-wide localisation of the survey's divergences to the fewest fixes.
+Each case is the fix's representative subtune, failing with whydiff's
+explanation until the fix lands. Cases name this player as
+`format:musicassembler` (the `pysidtracker.formats` entry point). After a survey
+`run`, regenerate (existing ids are kept) and drop fixed cases with `--prune`:
+
+```bash
+python -m pysidtracker.pathdiff build $HVSC .hvsc-survey/tunes.csv --work .hvsc-survey \
+    --left 6502 --right format:musicassembler --jobs 28 --force
+python -m pysidtracker.pathdiff rank --work .hvsc-survey \
+    --right format:musicassembler --explain 10
+python -m pysidtracker.pathdiff xfails --work .hvsc-survey \
+    --right format:musicassembler --manifest tests/fixtures/pathdiff.json --top 15 --verify
+```
+
+`rank` writes `fixes.csv` and `explain/<rank>.txt` (whydiff) under
+`.hvsc-survey/pathdiff/6502-format.musicassembler/`. To pre-fetch the cases' tunes:
+`pysid-tune-fetch --tests tests/fixtures/pathdiff.json`.
 
 ## Running locally
 

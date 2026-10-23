@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymusicassembler"
-version = "0.7.0"
+version = "0.8.0"
 description = "Pure-Python reader, writer, and player for Music Assembler SID songs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,13 +21,13 @@ classifiers = [
 ]
 # EmuPlayer boot, render_player_*, cadence_info and the media-aware
 # `fixtures fetch` back the player, audio, survey renderer and test fixtures.
-dependencies = ["pysidtracker>=0.30.0"]
+dependencies = ["pysidtracker>=0.37.0"]
 
 [project.optional-dependencies]
 dev = [
     "black>=24",
     "pylint>=3",
-    "pysidtracker[survey]>=0.30.0",
+    "pysidtracker[survey]>=0.37.0",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",
@@ -37,6 +37,9 @@ dev = [
 
 [project.scripts]
 pymusicassembler = "pymusicassembler.cli:main"
+
+[project.entry-points."pysidtracker.formats"]
+musicassembler = "pymusicassembler.formats:MUSIC_ASSEMBLER"
 
 [project.urls]
 Homepage = "https://github.com/anarkiwi/pymusicassembler"
