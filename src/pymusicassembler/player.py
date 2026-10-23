@@ -279,11 +279,12 @@ class Player(EmuPlayer):
             self._wr(lay.fc_step, ((param & 0x0F) << 1) - 0x10)
             y = (y + 1) & 0xFF
             res = self._rd(pat + y)
-            if res == 0:
-                self._set(RES_FILT, 0xF0)
-            else:
+            if res:
                 self._wr(lay.fc_ctr_reset, res)
-                self._set(RES_FILT, self._rd(lay.res_presets + v))
+            self._wr(
+                lay.res_sid + RES_FILT,
+                self._rd(lay.res_presets + v) if res else 0xF0,
+            )
         elif ctl & constants.CTL_VIBARP:
             y = (y + 1) & 0xFF
             self._wr(lay.vib_lo_step + v, self._rd(pat + y))
@@ -363,7 +364,7 @@ class Player(EmuPlayer):
             self._inc(lay.sweep_dec, -1)
             cutoff = self._rd(lay.sweep_acc) + self._rd(lay.sweep_step)
             self._wr(lay.sweep_sta, cutoff)
-            self._set(FC_HI, cutoff & 0xFF)
+            self._wr(lay.fc_sid + FC_HI, cutoff & 0xFF)
         flags = self._rd(lay.flags + v)
         if flags & 0x0F:
             self._program(v, flags & 0x0F)

@@ -1,15 +1,1 @@
-[
- {
-  "compare": "lead",
-  "frames": 11,
-  "id": "36d34b50379c",
-  "key": "('first', '', 'musicassembler:edge:pysidtracker/paths.py:py_paths:898>899')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "7762b5b12075faadbfe47a12c41abcb4",
-  "reason": "pysidtracker/paths.py:898 for _ in tqdm(range(nframes), unit=\"frame\", disable=not progress): -> 899: reference frame 2, register $16 fc_hi",
-  "relpath": "MUSICIANS/M/Mateus/Cannon_Craze.sid",
-  "right": "format:musicassembler",
-  "song": 2
- }
-]
+[]

@@ -375,6 +375,25 @@ def test_registers_are_written_to_the_players_sid(tune_path):
     assert player._rd(0xD504) == 0x41 and player.snapshot()[4] == 0x00
 
 
+def test_filter_is_written_to_its_own_sid_page(tune_path):
+    player = Player(reader.read(tune_path))
+    lay = player._lay = replace(
+        player.layout, sid=FREE + 0x200, res_sid=0xD500, fc_sid=0xD600
+    )
+    pat = FREE
+    shadow = [player._rd(FREE + 0x215 + r) for r in range(4)]
+    player._wr(pat + 1, constants.CTL_FILTER)
+    player._wr(pat + 3, 0)
+    player._note(0, pat, 0, 0)
+    player._wr(lay.sweep_owner, 0)
+    player._wr(lay.sweep_ctr, 1)
+    player._wr(lay.sweep_acc, 0x40)
+    player._wr(lay.sweep_step, 0x10)
+    player._sustain(0, lay.instr, constants.CTL_TRIGGERED)
+    assert (player._rd(0xD517), player._rd(0xD616)) == (0xF0, 0x50)
+    assert [player._rd(FREE + 0x215 + r) for r in range(4)] == shadow
+
+
 def _rsid(song, irq="CLI"):
     """``song`` as an RSID (play 0) whose init installs a KERNAL IRQ calling play."""
     init, entry = song.init_addr, Player(song).layout.entry
