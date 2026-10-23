@@ -2,19 +2,6 @@
  {
   "compare": "lead",
   "frames": 9,
-  "id": "08b94a18add9",
-  "key": "('path', '6502:edge:a324cf149f620f58c966dfc7', ())",
-  "kind": "path",
-  "left": "6502",
-  "md5": "2a1d94de6ce5e6f096ec74440975d3f9",
-  "reason": "$65EA JSR $b521 -> out: reference frame 0, register $17 res_filt",
-  "relpath": "MUSICIANS/B/Bjoernerud_Sebastian/Mission_Nada.sid",
-  "right": "format:musicassembler",
-  "song": 1
- },
- {
-  "compare": "lead",
-  "frames": 9,
   "id": "0e72531b8f64",
   "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._play:153>154')",
   "kind": "first",
@@ -80,45 +67,6 @@
  {
   "compare": "lead",
   "frames": 9,
-  "id": "78bd8a5d9514",
-  "key": "('first', '6502:edge:82d3d3d7ba4f74aa0d901237', '')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "26fd0ff8ab67bf7ad0a828acc776187d",
-  "reason": "$A526 BMI $a534 -> $A534: reference frame 0, register $17 res_filt",
-  "relpath": "MUSICIANS/W/Waz/Pacman-esque.sid",
-  "right": "format:musicassembler",
-  "song": 3
- },
- {
-  "compare": "lead",
-  "frames": 9,
-  "id": "dc554a182a34",
-  "key": "('first', '6502:edge:4bcf3ea7ae4420fbe198eedd', '')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "03e7359e5736425a374a0c0f5dd20e44",
-  "reason": "$9AB0 BMI $9ad2 -> $9AD2: reference frame 0, register $17 res_filt",
-  "relpath": "MUSICIANS/Y/Yaemon/Twin-Down.sid",
-  "right": "format:musicassembler",
-  "song": 2
- },
- {
-  "compare": "lead",
-  "frames": 9,
-  "id": "df976ab5481d",
-  "key": "('first', '6502:edge:0410ee8d2ac3f27c93e6464e', '')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "03e7359e5736425a374a0c0f5dd20e44",
-  "reason": "$A326 BMI $a334 -> $A334: reference frame 0, register $17 res_filt",
-  "relpath": "MUSICIANS/Y/Yaemon/Twin-Down.sid",
-  "right": "format:musicassembler",
-  "song": 3
- },
- {
-  "compare": "lead",
-  "frames": 9,
   "id": "fcd84d8248c2",
   "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._note:222>225')",
   "kind": "first",
@@ -141,18 +89,5 @@
   "relpath": "MUSICIANS/R/Riot/Elaroo_preview.sid",
   "right": "format:musicassembler",
   "song": 3
- },
- {
-  "compare": "lead",
-  "frames": 10,
-  "id": "fddfa2d3733e",
-  "key": "('first', '6502:edge:cdc4d5e9239f04fbd228e633', '')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "03e7359e5736425a374a0c0f5dd20e44",
-  "reason": "$AB26 BMI $ab34 -> $AB28: reference frame 1, register $00 v1_freq_lo",
-  "relpath": "MUSICIANS/Y/Yaemon/Twin-Down.sid",
-  "right": "format:musicassembler",
-  "song": 4
  }
 ]
