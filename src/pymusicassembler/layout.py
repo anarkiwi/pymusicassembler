@@ -28,7 +28,7 @@ PLAY_ENTRY = CodePattern("A2 00 CE {tempo:w} 30 {bmi}")
 # records where a self-modified immediate operand lives.
 _ROUTINES = (
     ("entry", "A2 00 CE {tempo:w} 30 {to_reload} 20 {output:w}"),
-    ("to_reload", "A9 ?? 8D ?? ?? 20 {advance:w}"),
+    ("to_reload", "A9 {at_tempo_reload} 8D ?? ?? 20 {advance:w}"),
     ("advance", "DE {dur:w}"),
     ("advance_end", "30 {to_parse}"),
     (
@@ -373,7 +373,6 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
                 name, value = name[3:], addr + offset
             found[name] = value
         found[f"{at}_end"] = addr + pattern.length
-    found["tempo_reload"] = found["to_reload"] + 1
     found["pulse_always"] = found["to_pulse_sweep"] == found["to_sustain_end_end"]
     if found["arp_down_op"] not in (STA_ABS_X, CMP_ABS_X):
         raise MusicAssemblerParseError("player signatures not found (arp descent)")
