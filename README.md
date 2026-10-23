@@ -17,8 +17,7 @@ emulator, so subtune selection and packed/relocating rips play as on a C64.
 ## Install
 
 ```bash
-pip install pymusicassembler          # reader/writer/player/reglog (pure stdlib)
-pip install pymusicassembler[audio]   # + WAV rendering via pyresidfp
+pip install pymusicassembler   # reader/writer/player/reglog and WAV rendering (pyresidfp)
 ```
 
 ## Usage
@@ -43,6 +42,7 @@ tests and the whole-HVSC survey.
 
 ```bash
 pip install -e ".[dev]"
+pysidtracker fixtures fetch tests/fixtures/ma_native.txt --cache tests/.native  # editor P./S. files
 ./run_tests.sh        # black + pylint + pytest with coverage
 ```
 

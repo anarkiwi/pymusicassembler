@@ -8,6 +8,7 @@ import oracle_hvsc
 import pytest
 
 import pysidtracker
+from pysidtracker import cadence as cadence_mod
 from pysidtracker.cadence import Cadence, playroutine_cadence
 from pysidtracker.registers import PAL_CLOCK_HZ, PAL_CYCLES_PER_FRAME
 from pysidtracker.sidid import sidid_signatures
@@ -30,6 +31,7 @@ def test_render_matches_player(tune_path):
         "rsid": False,
         "trigger": "pal_video",
         "speed": 1,
+        "dynamic": False,
     }
 
 
@@ -45,14 +47,14 @@ def test_render_selects_one_based_subtune(tune_path, monkeypatch):
         return playroutine_cadence(data, subtune=subtune)
 
     monkeypatch.setattr(oracle_hvsc, "Player", player)
-    monkeypatch.setattr(oracle_hvsc, "playroutine_cadence", cadence)
+    monkeypatch.setattr(cadence_mod, "playroutine_cadence", cadence)
     oracle_hvsc.render(tune_path.read_bytes(), 3, 10)
     assert sorted(seen) == [("cadence", 2), ("player", 2)]
 
 
 def test_unknown_cadence_source(tune_path, monkeypatch):
     monkeypatch.setattr(
-        oracle_hvsc,
+        cadence_mod,
         "playroutine_cadence",
         lambda data, subtune: Cadence(PAL_CYCLES_PER_FRAME, None, PAL_CLOCK_HZ),
     )

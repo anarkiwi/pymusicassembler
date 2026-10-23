@@ -1,25 +1,16 @@
-"""Music Assembler playroutine as a :class:`pysidtracker.MemPlayer`.
+"""Music Assembler playroutine on a :class:`pysidtracker.EmuPlayer` boot.
 
-The tune's own init runs in the 6502 emulator (selecting the subtune and
-placing any relocated data); the play call is then modelled in Python on the
-player's work cells, at the addresses :mod:`pymusicassembler.layout` finds.
-
-The start-up memory is the shared libsidplayfp power-on image
-(:func:`pysidtracker.power_on_ram`), inherited from :class:`MemPlayer`, so a
-record read past the end of the image sees what the C64 RAM held at power-on.
+The tune's own init runs in the 6502 emulator as the PSID driver boots it
+(power-on RAM, PAL/NTSC flag, banking; selecting the subtune and placing any
+relocated data); the play call is then modelled in Python on the player's work
+cells, at the addresses :mod:`pymusicassembler.layout` finds.
 """
 
 from typing import List, Optional
 
-from pysidtracker import (
-    MemPlayer,
-    psid_init_bank,
-    psid_play_bank,
-    run_to_rts,
-    wire_mpu,
-)
+from pysidtracker import PSID_MAGIC, RSID_MAGIC, EmuPlayer, parse_sid_header
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
-from pysidtracker.registers import PW_HI_REGS, RES_FILT, SR
+from pysidtracker.registers import RES_FILT, SR, sid_model_for_flags
 
 from pymusicassembler import constants, layout
 from pymusicassembler.errors import MusicAssemblerParseError
@@ -28,20 +19,31 @@ from pymusicassembler.model import Song
 MAX_CYCLES = 8_000_000
 
 
-class Player(MemPlayer):
+class Player(EmuPlayer):
     """Play a :class:`~pymusicassembler.model.Song` one play call at a time.
 
-    ``subtune`` (0-based) is passed to the tune's init in the accumulator.
+    ``subtune`` (0-based) is passed to the tune's init in the accumulator. The
+    container header, if any, sets the SID model and the PAL/NTSC flag.
     """
 
     def __init__(self, song: Song, subtune: int = 0):
         self._song = song
-        self._mpu = self._bus = None
         self._entries = set()
         self._layouts = {}
         self._lay: Optional[layout.Layout] = None
         self.layout: Optional[layout.Layout] = None
-        super().__init__(song.image, song.load_addr, subtune)
+        sid = song.container_header[:4] in (PSID_MAGIC, RSID_MAGIC)
+        header = parse_sid_header(song.container_header) if sid else None
+        super().__init__(
+            song.image,
+            song.load_addr,
+            song.init_addr,
+            song.play_addr or song.init_addr,
+            subtune,
+            max_cycles=MAX_CYCLES,
+            sid_model=sid_model_for_flags(header.flags) if header else "6581",
+            ntsc=bool(header and header.is_ntsc),
+        )
 
     @property
     def base(self) -> int:
@@ -57,13 +59,6 @@ class Player(MemPlayer):
     def tempo_reload(self) -> int:
         """The play-call divider reload (``LDA #n`` at the play entry's BMI target)."""
         return self._rd(self.layout.tempo_reload)
-
-    def snapshot(self) -> List[int]:
-        """The SID register file, pulse-width highs masked to the nibble the SID uses."""
-        regs = super().snapshot()
-        for reg in PW_HI_REGS:
-            regs[reg] &= 0x0F
-        return regs
 
     # -- memory helpers --------------------------------------------------
     def _set(self, offset: int, value: int) -> None:
@@ -84,7 +79,7 @@ class Player(MemPlayer):
         reads the ROM-less set -- a 0xEA kernal, zero basic and chargen -- not the
         RAM behind it, so a player table that lands in those banks sees it too.
         """
-        bus = self._bus._subject
+        bus = self._obs._subject
         for page_id, page in enumerate(bus.pages):
             if page is None or page is bus.ram:
                 continue
@@ -94,12 +89,7 @@ class Player(MemPlayer):
 
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
-        # Boot the bus as the PSID driver does and leave the play bank in.
-        self._mem[1] = psid_init_bank(self._song.init_addr)
-        self._mpu, self._bus = wire_mpu(self._mem)
-        run_to_rts(self._mpu, self._bus, self._song.init_addr, subtune, MAX_CYCLES)
-        # Bank the play's ROM space in through the bus, which re-derives its pages.
-        self._bus[1] = psid_play_bank(self._song.play_addr or self._song.init_addr)
+        super()._init(subtune)
         self._view_rom_pages()
         self._entries = {m.addr for m in layout.play_entries(self._mem)}
         play = self._song.play_addr
@@ -139,7 +129,7 @@ class Player(MemPlayer):
 
         With ``probe`` stop at, and return, the first play entry reached.
         """
-        mpu, bus = self._mpu, self._bus
+        mpu, bus = self._mpu, self._obs
         top = mpu.sp
         for byte in (0x00, 0x01):
             bus[0x0100 + mpu.sp] = byte

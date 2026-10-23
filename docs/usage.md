@@ -18,7 +18,7 @@ grid = ma.render_grid(song, nframes=400)
 
 # Register log (clock reg val triples), and WAV via an emulated SID.
 ma.write_reglog(ma.iter_register_writes(song, max_frames=2500), "tune.reglog")
-ma.render_wav(song, "tune.wav", seconds=30)   # needs the audio extra
+ma.render_wav(song, "tune.wav", seconds=30, progress=True)
 
 # Edit and re-emit, byte-stable.
 song.patterns[0].data[0] = ma.constants.DUR_MIN  # tweak a pattern byte
@@ -64,7 +64,8 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 - `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`.
 - `iter_frames(song, max_frames)` — per-frame writes.
 - `render_grid(song, nframes) -> list[list[int]]` — forward-filled grid.
-- `render_samples` / `render_wav` / `write_wav` — audio (pyresidfp extra).
+- `render_samples` / `render_wav` / `write_wav` — audio via
+  `pysidtracker.audio.render_player_samples` (pyresidfp).
 - `iter_register_writes` / `read_reglog` / `write_reglog` / `RegWrite`.
 - Model: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
   `PresetBank`, and the decoded pattern events `NoteEvent` / `InstrumentEvent`
