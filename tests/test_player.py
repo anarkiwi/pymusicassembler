@@ -164,6 +164,22 @@ def test_program_jump_of_a_later_build(later_tune_path, row, cursor):
 
 
 @pytest.mark.parametrize(
+    "bound,row,cursor", [(0, 2, 6), (0, 4, 0), (5, 4, 12), (0xFE, 2, 0)]
+)
+def test_program_jump_bounds_by_its_own_cell(later_tune_path, bound, row, cursor):
+    """A rip's unrelocated jump operand bounds the row by whatever cell it reads."""
+    player = Player(reader.read(later_tune_path))
+    lay = player.layout = player._lay = replace(player.layout, program_jump=FREE + 8)
+    _poke(player, FREE, (0x41, 0x80, 0, 0xFD, row, 0, 0, 0, bound))
+    player._wr(lay.inner_lo + 1, FREE & 0xFF)
+    player._wr(lay.inner_hi + 1, FREE >> 8)
+    player._wr(lay.instr_cursor, 0)
+    player._wr(lay.ctrl_mask, 0xFF)
+    player._program(0, 1)
+    assert player._rd(lay.instr_cursor) == cursor
+
+
+@pytest.mark.parametrize(
     "lo,hi,expect",
     [
         (0x00, 0x01, (0x00, 0x01)),

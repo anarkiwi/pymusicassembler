@@ -71,7 +71,8 @@ def test_order_jump_hook_build(tune_path):
 
 def test_later_build_features(later_tune_path):
     lay, image = _layout(later_tune_path)
-    assert lay.order_tempo and lay.order_jump and lay.program_jump
+    assert lay.order_tempo and lay.order_jump
+    assert lay.program_jump == lay.instr_cursor
     assert lay.init < lay.entry < lay.tempo
     assert image.peek(lay.tempo_reload - 1) == 0xA9
 

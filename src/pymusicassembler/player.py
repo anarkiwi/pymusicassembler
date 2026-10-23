@@ -385,7 +385,8 @@ class Player(EmuPlayer):
         marker = self._rd(base + nxt)
         if lay.program_jump and marker == layout.PROGRAM_JUMP:
             row = self._rd(base + ((nxt + 1) & 0xFF))
-            nxt = 0 if row == 0 or row >= nxt else (row * 3) & 0xFF
+            bound = (self._rd(lay.program_jump + v) + 3) & 0xFF
+            nxt = 0 if row == 0 or row >= bound else (row * 3) & 0xFF
         elif marker == 0xFE:
             self._wr(lay.flags + v, self._rd(lay.flags + v) & 0xF0)
         elif marker == 0xFF:
