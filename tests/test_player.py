@@ -96,7 +96,7 @@ def test_rows_advance_every_reload_plus_one_calls(tune_path, reload):
 
 
 # pylint: disable=protected-access
-FREE = 0xF000  # RAM no tested tune uses
+FREE = 0xC000  # RAM no tested tune uses
 
 
 def _poke(player, addr, data):
@@ -291,7 +291,26 @@ def test_every_player_instance_called_is_modelled(tune_path):
     )
     player = Player(song)
     player.render_grid(4)
-    assert sorted(player._layouts) == [first, 0xF021]
+    assert sorted(entry for _, entry in player._layouts) == [first, 0xF021]
+
+
+def test_player_under_a_banked_out_rom_is_modelled(tune_path):
+    song = reader.read(tune_path)
+    direct = Player(song).render_grid(60)
+    entry = Player(song).layout.entry
+    image = bytearray(song.image)
+    at = entry - song.load_addr
+    body = bytes(image[at : at + 0x1B])
+    wrapper = bytes(
+        (0xA9, 0x35, 0x85, 0x01, 0x20, 0x21, 0xE0, 0xA9, 0x37, 0x85, 0x01, 0x60)
+    )
+    image += bytes(FREE - song.load_addr - len(image)) + wrapper
+    song.image = bytes(image + bytes(0xE021 - song.load_addr - len(image)) + body)
+    song.play_addr = FREE
+    player = Player(song)
+    assert player.layout.entry == 0xE021
+    assert [row[:24] for row in player.render_grid(60)] == [row[:24] for row in direct]
+    assert player.memory[0xE021 : 0xE021 + len(body)] == body
 
 
 def test_sweep_follows_its_own_operands(tune_path):

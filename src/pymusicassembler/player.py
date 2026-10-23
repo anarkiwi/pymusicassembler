@@ -6,7 +6,7 @@ relocated data); the play call is then modelled in Python on the player's work
 cells, at the addresses :mod:`pymusicassembler.layout` finds.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Set
 
 from pysidtracker import PSID_MAGIC, RSID_MAGIC, EmuPlayer, parse_sid_header
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
@@ -28,7 +28,8 @@ class Player(EmuPlayer):
 
     def __init__(self, song: Song, subtune: int = 0):
         self._song = song
-        self._entries = set()
+        self._bus = None
+        self._entries = {}
         self._layouts = {}
         self._lay: Optional[layout.Layout] = None
         self.layout: Optional[layout.Layout] = None
@@ -72,39 +73,50 @@ class Player(EmuPlayer):
         self._wr(addr, value)
         return value
 
-    def _view_rom_pages(self) -> None:
-        """Make the flat memory read what the bus does for a banked-in ROM page.
+    def _rd(self, addr: int) -> int:
+        return self._bus[addr & 0xFFFF]
 
-        With a ROM banked in over its RAM (the PSID driver's own iomap), the C64
-        reads the ROM-less set -- a 0xEA kernal, zero basic and chargen -- not the
-        RAM behind it, so a player table that lands in those banks sees it too.
+    def _view(self) -> bytearray:
+        """The 64 KiB as the CPU reads it under the current ``$01`` banking.
+
+        A banked-in ROM page reads the ROM-less set (a 0xEA kernal, zero basic
+        and chargen), not the RAM behind it; the RAM itself is left intact for
+        a play routine that banks the ROM out before calling the player.
         """
-        bus = self._obs._subject
+        bus = self._bus
+        view = bytearray(bus.ram)
         for page_id, page in enumerate(bus.pages):
-            if page is None or page is bus.ram:
-                continue
-            self._mem[page_id << 12 : (page_id + 1) << 12] = page[
-                page_id << 12 : (page_id + 1) << 12
-            ]
+            if page is not None and page is not bus.ram:
+                span = slice(page_id << 12, (page_id + 1) << 12)
+                view[span] = page[span]
+        return view
+
+    def _bank_entries(self) -> Set[int]:
+        """The play entries the CPU sees under the current ``$01`` banking."""
+        bits = self._bus.bits
+        if bits not in self._entries:
+            self._entries[bits] = {m.addr for m in layout.play_entries(self._view())}
+        return self._entries[bits]
 
     # -- init --------------------------------------------------------------
     def _init(self, subtune: int) -> None:
         super()._init(subtune)
-        self._view_rom_pages()
-        self._entries = {m.addr for m in layout.play_entries(self._mem)}
+        self._bus = self._obs._subject
         play = self._song.play_addr
-        entry = self._probe(play) if play else None
-        if entry is None:
-            entry = layout.resolve_entry(self._mem, play)
-        if entry is None:
-            raise MusicAssemblerParseError("no play entry after init")
-        self.layout = self._lay = self._instance(entry)
+        lay = self._probe(play) if play else None
+        if lay is None:
+            entry = layout.resolve_entry(self._view(), play)
+            if entry is None:
+                raise MusicAssemblerParseError("no play entry after init")
+            lay = self._instance(entry)
+        self.layout = self._lay = lay
 
     def _instance(self, entry: int) -> layout.Layout:
         """The layout of the player instance whose play entry is ``entry``."""
-        if entry not in self._layouts:
-            self._layouts[entry] = layout.discover(self._mem, entry)
-        return self._layouts[entry]
+        key = (self._bus.bits, entry)
+        if key not in self._layouts:
+            self._layouts[key] = layout.discover(self._view(), entry)
+        return self._layouts[key]
 
     # -- one play call -----------------------------------------------------
     def _frame(self) -> None:
@@ -114,20 +126,22 @@ class Player(EmuPlayer):
         else:
             self._call(play)
 
-    def _probe(self, play: int) -> Optional[int]:
-        """The play entry the play routine reaches first, leaving no trace."""
+    def _probe(self, play: int) -> Optional[layout.Layout]:
+        """The player instance the play routine calls first, leaving no trace."""
         mpu = self._mpu
         mem = bytes(self._mem)
         regs = (mpu.pc, mpu.sp, mpu.a, mpu.x, mpu.y, mpu.p, mpu.processorCycles)
-        entry = self._call(play, probe=True)
+        lay = self._call(play, probe=True)
         self._mem[:] = mem
+        self._bus[1] = mem[1]
         mpu.pc, mpu.sp, mpu.a, mpu.x, mpu.y, mpu.p, mpu.processorCycles = regs
-        return entry
+        return lay
 
-    def _call(self, play: int, probe: bool = False) -> Optional[int]:
+    def _call(self, play: int, probe: bool = False) -> Optional[layout.Layout]:
         """Run the play routine on the CPU, modelling each call into the player.
 
-        With ``probe`` stop at, and return, the first play entry reached.
+        With ``probe`` stop at, and return the instance of, the first play entry
+        reached (discovered under the banking the routine calls it with).
         """
         mpu, bus = self._mpu, self._obs
         top = mpu.sp
@@ -137,12 +151,13 @@ class Player(EmuPlayer):
         mpu.pc = play
         start = mpu.processorCycles
         while mpu.sp < top and mpu.processorCycles - start < MAX_CYCLES:
-            if mpu.pc not in self._entries:
+            if mpu.pc not in self._bank_entries():
                 mpu.step()
                 continue
+            lay = self._instance(mpu.pc)
             if probe:
-                return mpu.pc
-            self._play(self._instance(mpu.pc))
+                return lay
+            self._play(lay)
             mpu.sp = (mpu.sp + 2) & 0xFF
             ret = bus[0x00FF + mpu.sp] | (bus[0x0100 + mpu.sp] << 8)
             mpu.pc = (ret + 1) & 0xFFFF
