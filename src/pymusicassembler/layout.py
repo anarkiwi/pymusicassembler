@@ -34,15 +34,17 @@ _ROUTINES = (
     (
         "to_parse",
         "BC {pattern_id:w} C0 FE D0 09 BD {gate_ctrl:w} 29 FE 9D ?? ?? 60 B9 {pattern_lo:w}"
-        " 85 ?? B9 {pattern_hi:w} 85 ?? BC {pat_cursor:w} B1 ?? 30 20 C9 60"
-        " 90 {to_note} 29 1F 9D ?? ?? A9 FE 9D {gate_mask:w} 20 ?? ?? 4C {row_end:w}",
+        " 85 ?? B9 {pattern_hi:w} 85 ?? BC {pat_cursor:w} B1 ?? 30 {to_long} C9 60"
+        " 90 {to_note} 29 1F 9D {dur_short:w} A9 FE 9D {gate_mask:w} 20 ?? ??"
+        " 4C {row_end:w}",
     ),
+    ("to_long", "C9 A0 90 ?? 29 1F 9D {dur_long:w}"),
     (
         "to_note",
         "85 ?? C8 BD {transrep:w} 4A 4A 4A 4A 18 65 ?? 9D {note_index:w} 84 ?? A8"
         " B9 {freq_lo:w} 9D {freq_lo_w:w} 9D {vib_freq_lo:w} B9 {freq_hi:w}"
         " 9D {freq_hi_w:w} 9D {vib_freq_hi:w} A4 ?? B1 ?? 9D {note_ctl:w} 29 1F"
-        " 9D ?? ?? B1 ?? 30 {to_filter} 29 20 F0 ?? C8 B1 ?? 9D {vib_lo_step:w}"
+        " 9D {dur_note:w} B1 ?? 30 {to_filter} 29 20 F0 ?? C8 B1 ?? 9D {vib_lo_step:w}"
         " C8 B1 ?? 9D {vib_hi_step:w}",
     ),
     (
@@ -108,25 +110,17 @@ VIB_OUT = CodePattern(
     " 7D ?? ?? 9D ?? ?? 99 00 ?? BD {hi:w}"
 )
 
-# Optional commands later builds decode: (feature, pattern, captured cell that
-# must equal the named Layout cell, so a match belongs to this player instance).
-_FEATURES = (
-    (
-        "order_tempo",
-        CodePattern("C9 FC D0 ?? C8 B1 ?? 8D {cell:w} 8D ?? ?? C8 4C"),
-        "tempo_reload",
-    ),
-    (
-        "order_jump",
-        CodePattern("C9 FD D0 ?? C8 B1 ?? 0A 9D {cell:w} A8"),
-        "order_cursor",
-    ),
-    (
-        "order_jump",
-        CodePattern("C9 FD F0 01 60 C8 B1 ?? 0A 9D {cell:w} A8"),
-        "order_cursor",
-    ),
+# Orderlist step at row_end_end: plain, via a $FD jump hook, or inline $FC/$FD.
+_ORDER_STEPS = tuple(
+    CodePattern(f"{spec} C9 {{order_end}} D0 02 A0 {{order_restart}}")
+    for spec in (
+        "C8 B1 ??",
+        "20 {order_hook:w}",
+        "C8 B1 ?? C9 FC D0 0D C8 B1 ?? 8D {tempo_sta:w} 8D {tempo_sta2:w} C8 4C ?? ??"
+        " C9 FD D0 0B C8 B1 ?? 0A 9D {order_jump:w} A8 4C ?? ??",
+    )
 )
+ORDER_HOOK = CodePattern("C8 B1 ?? C9 FD F0 01 60 C8 B1 ?? 0A 9D {order_jump:w} A8")
 
 # The program routine's ``$FD r`` jump, at its marker compare: bounds ``r`` by
 # ``cell,X + 3`` (``instr_cursor`` but for rips that left the operand unrelocated).
@@ -156,6 +150,9 @@ class Layout:
     pattern_hi: int
     pat_cursor: int
     dur: int
+    dur_short: int
+    dur_long: int
+    dur_note: int
     ctrl_mask: int
     gate_mask: int
     instr_x8: int
@@ -226,8 +223,10 @@ class Layout:
     sid: int
     res_sid: int
     fc_sid: int
-    order_tempo: bool = False
-    order_jump: bool = False
+    order_tempo: Tuple[int, ...] = ()
+    order_jump: int = 0
+    order_end: int = constants.ORDER_END
+    order_restart: int = 0
     program_jump: int = 0
     pulse_always: bool = False
     output_voices: Tuple[int, ...] = (0, 1, 2)
@@ -352,6 +351,31 @@ def _output_voices(image: SidImage, entry: int, output: int) -> Tuple[int, ...]:
     return tuple(voices)
 
 
+def _match_at(image: SidImage, pattern: CodePattern, addr: int) -> Optional[Match]:
+    hit = find_code_all(image, pattern, start=addr, end=addr + pattern.length)
+    return hit[0] if hit else None
+
+
+def _order_step(image: SidImage, addr: int) -> dict:
+    """The orderlist step's end marker, restart index and command store cells.
+
+    Unrecognised steps keep the standard ``$FF`` end, restart 0 and no commands.
+    """
+    for pattern in _ORDER_STEPS:
+        hit = _match_at(image, pattern, addr)
+        if hit is None:
+            continue
+        found = dict(hit.captures)
+        if "tempo_sta" in found:
+            found["order_tempo"] = (found.pop("tempo_sta"), found.pop("tempo_sta2"))
+        if "order_hook" in found:
+            hook = _match_at(image, ORDER_HOOK, found.pop("order_hook"))
+            if hook is not None:
+                found["order_jump"] = hook.captures["order_jump"]
+        return found
+    return {}
+
+
 def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     """The :class:`Layout` of the player whose play entry is at ``entry``.
 
@@ -362,13 +386,13 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     found = {"entry": entry}
     for at, pattern in _ROUTINES:
         addr = _follow_jmp(image, found[at])
-        hit = find_code_all(image, pattern, start=addr, end=addr + pattern.length)
-        if not hit:
+        hit = _match_at(image, pattern, addr)
+        if hit is None:
             raise MusicAssemblerParseError(
                 f"player signatures not found ({at} at {addr:#06x}); unsupported variant"
             )
         for name, offset, _ in pattern.captures:
-            value = hit[0].captures[name]
+            value = hit.captures[name]
             if name[:3] == "to_":
                 value = addr + offset + 1 + _s8(value)
             elif name[:3] == "at_":
@@ -387,17 +411,9 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     found["init"] = min(
         (m.addr for m in inits), key=lambda a: abs(a - entry), default=0
     )
-    for feature, pattern, cell in _FEATURES:
-        if any(
-            m.captures["cell"] == found[cell]
-            for m in find_code_all(image, pattern, start=start, end=end)
-        ):
-            found[feature] = True
-    at = found["program_end"] - 1
-    hit = find_code_all(
-        image, PROGRAM_JUMP_CODE, start=at, end=at + PROGRAM_JUMP_CODE.length
-    )
-    found["program_jump"] = hit[0].captures["cell"] if hit else 0
+    found.update(_order_step(image, found["row_end_end"]))
+    hit = _match_at(image, PROGRAM_JUMP_CODE, found["program_end"] - 1)
+    found["program_jump"] = hit.captures["cell"] if hit else 0
     for hit in find_code_all(image, TRANSREP_BYTE, start=start, end=end):
         if hit.captures["repeat"] == found["repeat"]:
             found["transrep_byte"] = hit.captures["cell"]

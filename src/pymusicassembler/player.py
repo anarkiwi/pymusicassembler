@@ -237,7 +237,7 @@ class Player(EmuPlayer):
         y = self._rd(lay.pat_cursor + v)
         val = self._rd(pat + y)
         if val >= constants.LONGDUR_MIN:
-            self._wr(lay.dur + v, val & constants.CTL_DUR_MASK)
+            self._wr(lay.dur_long + v, val & constants.CTL_DUR_MASK)
         elif val >= constants.INSTR_MIN:
             self._wr(lay.instr_x8 + v, val << 3)
             y = (y + 1) & 0xFF
@@ -258,7 +258,7 @@ class Player(EmuPlayer):
 
     def _duration(self, v: int, val: int) -> None:
         lay = self._lay
-        self._wr(lay.dur + v, val & constants.CTL_DUR_MASK)
+        self._wr(lay.dur_short + v, val & constants.CTL_DUR_MASK)
         self._wr(lay.gate_mask + v, 0xFE)
         self._gate_off(v)
 
@@ -275,7 +275,7 @@ class Player(EmuPlayer):
         y = (y + 1) & 0xFF
         ctl = self._rd(pat + y)
         self._wr(lay.note_ctl + v, ctl)
-        self._wr(lay.dur + v, ctl & constants.CTL_DUR_MASK)
+        self._wr(lay.dur_note + v, ctl & constants.CTL_DUR_MASK)
         if ctl & constants.CTL_FILTER:
             self._wr(lay.filter_owner, v)
             y = (y + 1) & 0xFF
@@ -316,15 +316,16 @@ class Player(EmuPlayer):
             val = self._rd(order + y)
             if lay.order_tempo and val == constants.ORDER_TEMPO:
                 tempo = self._rd(order + ((y + 1) & 0xFF))
-                self._wr(lay.tempo_reload, tempo)
-                self._wr(lay.tempo, tempo)
+                for cell in lay.order_tempo:
+                    self._wr(cell, tempo)
                 y = (y + 2) & 0xFF
             elif lay.order_jump and val == constants.ORDER_JUMP:
                 y = (self._rd(order + ((y + 1) & 0xFF)) << 1) & 0xFF
+                self._wr(lay.order_jump + v, y)
             else:
                 break
-        if val == constants.ORDER_END:
-            y = 0
+        if val == lay.order_end:
+            y = lay.order_restart
         self._wr(lay.order_cursor + v, y)
         self._wr(lay.pattern_id + v, self._rd(order + y))
         transrep = self._rd(order + ((y + 1) & 0xFF))

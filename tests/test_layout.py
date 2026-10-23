@@ -71,7 +71,7 @@ def test_standard_build_cells(tune_path):
 
 def test_order_jump_hook_build(tune_path):
     lay, _ = _layout(tune_path)
-    assert lay.order_jump == ("3LUX" in tune_path.name)
+    assert bool(lay.order_jump) == ("3LUX" in tune_path.name)
 
 
 def test_later_build_features(later_tune_path):
@@ -274,3 +274,39 @@ def test_gate_cells_are_read_from_the_parse_routine(tune_path):
         (lay.ctrl_mask & 0xFF) | 0xA000,
     )
     assert (moved.ctrl, moved.ctrl_mask) == (lay.ctrl, lay.ctrl_mask)
+
+
+def test_orderlist_step_is_read_from_the_row_end_code(tune_path):
+    """The end marker, restart index and jump store are the step's own operands."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(image, Player(reader.read(tune_path)).layout.entry)
+    assert (lay.order_end, lay.order_restart) == (0xFF, 0)
+    assert lay.order_jump == (lay.order_cursor if "3LUX" in tune_path.name else 0)
+    end = image.find_code(CodePattern("C9 FF D0 02 A0 00"), start=lay.entry).addr
+    image.poke(end + 1, 0x00)
+    image.poke(end + 5, 0x04)
+    if lay.order_jump:
+        hook = image.find_code(CodePattern("0A 9D ?? ?? A8"), start=end).addr
+        image.poke(hook + 3, image.peek(hook + 3) - 4)
+    moved = layout.discover(image, lay.entry)
+    assert (moved.order_end, moved.order_restart) == (0x00, 0x04)
+    assert moved.order_jump == (lay.order_jump - 0x400 if lay.order_jump else 0)
+    image.poke(end, 0xEA)
+    assert layout.discover(image, lay.entry) == replace(lay, order_jump=0)
+
+
+def test_inline_order_commands_store_where_the_code_does(later_tune_path):
+    lay, _ = _layout(later_tune_path)
+    assert lay.order_tempo == (lay.tempo_reload, lay.tempo)
+    assert lay.order_jump == lay.order_cursor
+
+
+def test_duration_stores_are_read_from_the_parse_routine(tune_path):
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(image, Player(reader.read(tune_path)).layout.entry)
+    assert lay.dur_long == lay.dur_short == lay.dur_note == lay.dur
+    long = image.find_code(CodePattern("C9 A0 90 ?? 29 1F 9D"), start=lay.entry).addr
+    image.poke(long + 8, 0xA0)
+    moved = layout.discover(image, lay.entry)
+    assert moved.dur_long == (lay.dur & 0xFF) | 0xA000
+    assert (moved.dur, moved.dur_short, moved.dur_note) == (lay.dur,) * 3
