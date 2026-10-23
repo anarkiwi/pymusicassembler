@@ -256,3 +256,21 @@ def test_arp_descent_store_or_compare(tune_path, op, cmp):
             layout.discover(image, lay.entry)
     else:
         assert layout.discover(image, lay.entry).arp_down_cmp is cmp
+
+
+def test_gate_cells_are_read_from_the_parse_routine(tune_path):
+    """A rip whose parse routine left its gate operands unrelocated keeps the
+    output and note routines' ``ctrl``/``ctrl_mask``."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(image, Player(reader.read(tune_path)).layout.entry)
+    assert (lay.gate_ctrl, lay.gate_mask) == (lay.ctrl, lay.ctrl_mask)
+    silence = image.find_code(CodePattern("C0 FE D0 09 BD"), start=lay.entry).addr
+    duration = image.find_code(CodePattern("A9 FE 9D ?? ?? 20"), start=silence).addr
+    for hi in (silence + 6, silence + 11, duration + 4):
+        image.poke(hi, 0xA0)
+    moved = layout.discover(image, lay.entry)
+    assert (moved.gate_ctrl, moved.gate_mask) == (
+        (lay.ctrl & 0xFF) | 0xA000,
+        (lay.ctrl_mask & 0xFF) | 0xA000,
+    )
+    assert (moved.ctrl, moved.ctrl_mask) == (lay.ctrl, lay.ctrl_mask)

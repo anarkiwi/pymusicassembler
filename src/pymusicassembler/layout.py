@@ -33,9 +33,9 @@ _ROUTINES = (
     ("advance_end", "30 {to_parse}"),
     (
         "to_parse",
-        "BC {pattern_id:w} C0 FE D0 09 BD {ctrl:w} 29 FE 9D ?? ?? 60 B9 {pattern_lo:w}"
+        "BC {pattern_id:w} C0 FE D0 09 BD {gate_ctrl:w} 29 FE 9D ?? ?? 60 B9 {pattern_lo:w}"
         " 85 ?? B9 {pattern_hi:w} 85 ?? BC {pat_cursor:w} B1 ?? 30 20 C9 60"
-        " 90 {to_note} 29 1F 9D ?? ?? A9 FE 9D {ctrl_mask:w} 20 ?? ?? 4C {row_end:w}",
+        " 90 {to_note} 29 1F 9D ?? ?? A9 FE 9D {gate_mask:w} 20 ?? ?? 4C {row_end:w}",
     ),
     (
         "to_note",
@@ -49,8 +49,8 @@ _ROUTINES = (
         "to_filter",
         "8E {filter_owner:w} C8 B1 ?? 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
         " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 ?? 17 ?? ?? 09 8D {fc_ctr_reset:w}"
-        " BD {res_presets:w} 8D 17 {res_sid} A9 FF 9D ?? ?? 9D {vib_toggle:w} A9 00"
-        " 9D {arp_substep:w} 9D {arp_phase:w}",
+        " BD {res_presets:w} 8D 17 {res_sid} A9 FF 9D {ctrl_mask:w} 9D {vib_toggle:w}"
+        " A9 00 9D {arp_substep:w} 9D {arp_phase:w}",
     ),
     (
         "row_end",
@@ -61,7 +61,7 @@ _ROUTINES = (
         "output",
         "BC {instr_x8:w} 84 ?? BD ?? ?? 29 40 D0 {to_sustain} 9D {instr_cursor:w}"
         " B9 {instr:w} 85 ?? B9 ?? ?? BC {voice_reg:w} 99 06 {sid} A5 ?? 99 05 ??"
-        " BD ?? ?? 29 FE 99 04 ?? A4 ?? B9 ?? ?? 9D ?? ?? B9 ?? ?? 9D {pw_lo:w}"
+        " BD {ctrl:w} 29 FE 99 04 ?? A4 ?? B9 ?? ?? 9D ?? ?? B9 ?? ?? 9D {pw_lo:w}"
         " 9D {pw_hi:w} E0 {at_trigger_owner} D0 0A A9 {at_trigger_acc} 8D {fc_acc:w}"
         " A9 {at_trigger_ctr} 8D {fc_ctr:w} A9 00"
         " 9D {pw_substep:w} 9D {pw_dir:w} B9 ?? ?? 4A 4A 4A 9D {porta_ctr:w}"
@@ -151,11 +151,13 @@ class Layout:
     transrep_byte: int
     repeat: int
     ctrl: int
+    gate_ctrl: int
     pattern_lo: int
     pattern_hi: int
     pat_cursor: int
     dur: int
     ctrl_mask: int
+    gate_mask: int
     instr_x8: int
     note_index: int
     freq_lo: int

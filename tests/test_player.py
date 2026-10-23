@@ -493,3 +493,18 @@ def test_vibrato_steps_the_output_cells_not_the_note_start(tune_path):
     player._sid_final(0)
     assert tuple(player.snapshot()[:2]) == (0xBB, 0x15)
     assert (player._rd(lay.vib_freq_lo), player._rd(lay.vib_out_lo)) == (0xEB, 0xBB)
+
+
+def test_duration_gates_the_parse_routines_own_cells(tune_path):
+    """The parse routine's gate-off masks the cells its own operands name."""
+    player = Player(reader.read(tune_path))
+    lay = player.layout = player._lay = replace(
+        player.layout, gate_ctrl=FREE, gate_mask=FREE + 3
+    )
+    _poke(player, FREE, (0x41,))
+    player._wr(lay.ctrl, 0x41)
+    player._wr(lay.ctrl_mask, 0xFF)
+    player._duration(0, 0x62)
+    assert (player._rd(FREE), player._rd(FREE + 3)) == (0x40, 0xFE)
+    assert (player._rd(lay.ctrl), player._rd(lay.ctrl_mask)) == (0x41, 0xFF)
+    assert player._rd(lay.dur) == 0x62 & constants.CTL_DUR_MASK

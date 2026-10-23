@@ -253,13 +253,13 @@ class Player(EmuPlayer):
         self._row_end(v, pat, y)
 
     def _gate_off(self, v: int) -> None:
-        addr = self._lay.ctrl + v
+        addr = self._lay.gate_ctrl + v
         self._wr(addr, self._rd(addr) & 0xFE)
 
     def _duration(self, v: int, val: int) -> None:
         lay = self._lay
         self._wr(lay.dur + v, val & constants.CTL_DUR_MASK)
-        self._wr(lay.ctrl_mask + v, 0xFE)
+        self._wr(lay.gate_mask + v, 0xFE)
         self._gate_off(v)
 
     def _note(self, v: int, pat: int, y: int, note: int) -> int:
