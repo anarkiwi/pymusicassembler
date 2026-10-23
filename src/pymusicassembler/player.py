@@ -454,10 +454,10 @@ class Player(EmuPlayer):
                 self._wr(lay.vib_toggle + v, toggled)
             if not toggled:
                 lo_step = self._rd(lay.vib_lo_step + v)
-                carry = (self._rd(lay.vib_freq_lo + v) + lo_step) >> 8
-                self._set(ofs + FREQ_LO, self._inc(lay.vib_freq_lo + v, lo_step))
+                carry = (self._rd(lay.vib_out_lo + v) + lo_step) >> 8
+                self._set(ofs + FREQ_LO, self._inc(lay.vib_out_lo + v, lo_step))
                 hi_step = self._rd(lay.vib_hi_step + v) + carry
-                self._set(ofs + FREQ_HI, self._inc(lay.vib_freq_hi + v, hi_step))
+                self._set(ofs + FREQ_HI, self._inc(lay.vib_out_hi + v, hi_step))
                 return
         self._set(ofs + FREQ_LO, self._rd(lay.freq_lo_w + v))
         self._set(ofs + FREQ_HI, self._rd(lay.freq_hi_w + v))

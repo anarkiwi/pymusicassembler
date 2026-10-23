@@ -11,18 +11,5 @@
   "relpath": "MUSICIANS/M/Mateus/Cannon_Craze.sid",
   "right": "format:musicassembler",
   "song": 2
- },
- {
-  "compare": "lead",
-  "frames": 138,
-  "id": "42d4395987ab",
-  "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._frame:112>113')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "163f446956ee2f3162146087def3960d",
-  "reason": "pymusicassembler/player.py:112 if play in (0, self.layout.entry): -> 113: reference frame 129, register $00 v1_freq_lo",
-  "relpath": "MUSICIANS/W/Widding_Roy_Johan/Piece_of_Cake_3_note.sid",
-  "right": "format:musicassembler",
-  "song": 1
  }
 ]

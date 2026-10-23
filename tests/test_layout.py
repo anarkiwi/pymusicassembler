@@ -177,3 +177,18 @@ def test_pulse_mode_branch(tune_path):
     )
     image.poke(at.addr + 12, 0)
     assert layout.discover(image, lay.entry).pulse_always
+
+
+def test_vibrato_output_cells_are_read_from_the_output_routine(tune_path):
+    """A note routine storing its vibrato start elsewhere leaves the output's cells."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(image, Player(reader.read(tune_path)).layout.entry)
+    assert (lay.vib_out_lo, lay.vib_out_hi) == (lay.vib_freq_lo, lay.vib_freq_hi)
+    at = image.find_code(
+        CodePattern(f"9D {lay.vib_freq_lo & 0xFF:02X} {lay.vib_freq_lo >> 8:02X} B9"),
+        start=lay.entry,
+    )
+    image.poke(at.addr + 2, 0x01)
+    patched = layout.discover(image, lay.entry)
+    assert patched.vib_freq_lo == (lay.vib_freq_lo & 0xFF) | 0x0100
+    assert (patched.vib_out_lo, patched.vib_out_hi) == (lay.vib_out_lo, lay.vib_out_hi)

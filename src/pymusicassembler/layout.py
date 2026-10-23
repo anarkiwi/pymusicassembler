@@ -93,6 +93,13 @@ _INIT = CodePattern(
 # Work cell holding the orderlist transrep byte, distinct from the transpose read cell.
 TRANSREP_BYTE = CodePattern("9D {cell:w} 29 0F 9D {repeat:w}")
 
+# The output routine's vibrato step: the accumulators it adds the note's steps to
+# (``vib_freq_lo``/``hi`` but for builds whose note routine stores elsewhere).
+VIB_OUT = CodePattern(
+    "BD {step:w} 29 01 F0 ?? BD {toggle:w} 49 FF 9D ?? ?? D0 ?? 18 BD {lo:w}"
+    " 7D ?? ?? 9D ?? ?? 99 00 ?? BD {hi:w}"
+)
+
 # Optional commands later builds decode: (feature, pattern, captured cell that
 # must equal the named Layout cell, so a match belongs to this player instance).
 _FEATURES = (
@@ -152,6 +159,8 @@ class Layout:
     note_ctl: int
     vib_lo_step: int
     vib_hi_step: int
+    vib_out_lo: int
+    vib_out_hi: int
     filter_owner: int
     fc_acc_reset: int
     fc_step: int
@@ -362,5 +371,14 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
             break
     else:
         found["transrep_byte"] = found["transrep"]
+    found["vib_out_lo"], found["vib_out_hi"] = next(
+        (
+            (m.captures["lo"], m.captures["hi"])
+            for m in find_code_all(image, VIB_OUT, start=start, end=end)
+            if (m.captures["step"], m.captures["toggle"])
+            == (found["vib_lo_step"], found["vib_toggle"])
+        ),
+        (found["vib_freq_lo"], found["vib_freq_hi"]),
+    )
     found["output_voices"] = _output_voices(image, entry, found["output"])
     return Layout(**{f.name: found[f.name] for f in fields(Layout) if f.name in found})
