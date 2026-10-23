@@ -1,5 +1,7 @@
 """Player-cell discovery from the player code (:mod:`pymusicassembler.layout`)."""
 
+from dataclasses import replace
+
 import pytest
 
 from pysidtracker import CodePattern, SidImage
@@ -167,6 +169,17 @@ def test_routines_are_followed_through_jmp_trampolines(tune_path):
     mem[0xF000:0xF006] = bytes((0x4C, 0x03, 0xF0, 0x4C, advance & 0xFF, advance >> 8))
     mem[call : call + 2] = bytes((0x00, 0xF0))
     assert layout.discover(mem, lay.entry) == lay
+
+
+def test_tempo_reload_read_past_jmp_trampoline(tune_path):
+    """The reload immediate is found where the entry's ``BMI`` trampoline leads."""
+    song = reader.read(tune_path)
+    mem = bytearray(Player(song).memory)
+    lay = layout.discover(mem, Player(song).layout.entry)
+    reload = lay.tempo_reload - 1
+    mem[0xF000:0xF008] = mem[reload : reload + 8]
+    mem[reload : reload + 3] = bytes((0x4C, 0x00, 0xF0))
+    assert layout.discover(mem, lay.entry) == replace(lay, tempo_reload=0xF001)
 
 
 def test_pulse_mode_branch(tune_path):
