@@ -110,12 +110,11 @@ _FEATURES = (
         CodePattern("C9 FD F0 01 60 C8 B1 ?? 0A 9D {cell:w} A8"),
         "order_cursor",
     ),
-    (
-        "program_jump",
-        CodePattern("C9 FD D0 ?? C8 BD {cell:w} 18 69 03 8D"),
-        "instr_cursor",
-    ),
 )
+
+# The program routine's ``$FD r`` jump, at its marker compare: bounds ``r`` by
+# ``cell,X + 3`` (``instr_cursor`` but for rips that left the operand unrelocated).
+PROGRAM_JUMP_CODE = CodePattern("C9 FD D0 ?? C8 BD {cell:w} 18 69 03 8D")
 
 PROGRAM_JUMP = constants.PROGRAM_JUMP
 
@@ -189,7 +188,7 @@ class Layout:
     sid: int
     order_tempo: bool = False
     order_jump: bool = False
-    program_jump: bool = False
+    program_jump: int = 0
     output_voices: Tuple[int, ...] = (0, 1, 2)
 
 
@@ -349,6 +348,11 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
             for m in find_code_all(image, pattern, start=start, end=end)
         ):
             found[feature] = True
+    at = found["program_end"] - 1
+    hit = find_code_all(
+        image, PROGRAM_JUMP_CODE, start=at, end=at + PROGRAM_JUMP_CODE.length
+    )
+    found["program_jump"] = hit[0].captures["cell"] if hit else 0
     for hit in find_code_all(image, TRANSREP_BYTE, start=start, end=end):
         if hit.captures["repeat"] == found["repeat"]:
             found["transrep_byte"] = hit.captures["cell"]

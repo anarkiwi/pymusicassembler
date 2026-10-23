@@ -1,19 +1,6 @@
 [
  {
   "compare": "lead",
-  "frames": 16,
-  "id": "12122a8ebfd7",
-  "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._sid_final:389>401')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "dc5668675af3f9527924da37598735cb",
-  "reason": "pymusicassembler/player.py:389 if self._rd(lay.note_ctl + v) & constants.CTL_VIBARP: -> 401: reference frame 7, register $0E v3_freq_lo",
-  "relpath": "MUSICIANS/R/Riot/Commodore_Format_Xmas_Demo.sid",
-  "right": "format:musicassembler",
-  "song": 1
- },
- {
-  "compare": "lead",
   "frames": 11,
   "id": "36d34b50379c",
   "key": "('first', '', 'musicassembler:edge:pysidtracker/paths.py:py_paths:898>899')",
@@ -63,18 +50,5 @@
   "relpath": "DEMOS/G-L/Lander-Lunacy_4_Digimix.sid",
   "right": "format:musicassembler",
   "song": 1
- },
- {
-  "compare": "lead",
-  "frames": 15,
-  "id": "fd07ab6c5f2a",
-  "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._sustain:308>309')",
-  "kind": "first",
-  "left": "6502",
-  "md5": "3e769061507ccea65e66f2e4809f7c28",
-  "reason": "pymusicassembler/player.py:308 if flags & 0x0F: -> 309: reference frame 6, register $00 v1_freq_lo",
-  "relpath": "MUSICIANS/R/Riot/Elaroo_preview.sid",
-  "right": "format:musicassembler",
-  "song": 3
  }
 ]
