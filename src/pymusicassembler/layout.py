@@ -15,6 +15,8 @@ from pymusicassembler.errors import MusicAssemblerParseError
 
 JMP_ABS = 0x4C
 JSR_ABS = 0x20
+STA_ABS_X = 0x9D
+CMP_ABS_X = 0xDD
 _RETURNS = (0x00, 0x40, 0x60, 0x6C)  # BRK, RTI, RTS, JMP (ind)
 IRQ_VECTORS = (0x0314, 0xFFFE)
 
@@ -74,8 +76,14 @@ _ROUTINES = (
     ("to_sustain_end", "A4 ?? B9 ?? ?? 85 ?? B5 ?? 29 40 F0 {to_pulse_sweep}"),
     (
         "to_arp",
-        "BD ?? ?? 29 20 D0 ?? B5 ?? 29 10 F0 ?? DE ?? ?? 10 ?? FE ?? ?? BD ?? ??"
-        " 29 03 A8 B9 {arp:w} D0 13",
+        "BD ?? ?? 29 20 D0 ?? B5 ?? 29 10 F0 ?? DE {at_arp_porta_dec} ?? 10 ??"
+        " FE {at_arp_porta_inc} ?? BD {at_arp_phase_rd} ?? 29 03 A8 B9 {arp:w} D0 13"
+        " A4 ?? 38 BD {at_arp_down_src} ?? F9 {at_arp_down_step} ?? {arp_down_op}"
+        " {at_arp_down_dst} ?? B0 18 DE {at_arp_down_hi} ?? D0 13 A4 ?? 18"
+        " BD {at_arp_up_src} ?? 79 {at_arp_up_step} ?? 9D {at_arp_up_dst} ?? 90 05"
+        " FE {at_arp_up_hi} ?? B0 00 FE {at_arp_substep_inc} ?? B9 {at_arp_speed} ??"
+        " 29 0F DD {at_arp_substep_cmp} ?? D0 08 A9 00 9D {at_arp_substep_clr} ??"
+        " FE {at_arp_phase_inc} ??",
     ),
     (
         "program",
@@ -192,6 +200,24 @@ class Layout:
     porta_ctr: int
     flags: int
     arp: int
+    # arp_* (but arp_down_cmp): where the arpeggio code's abs,X/abs,Y operands live
+    arp_porta_dec: int
+    arp_porta_inc: int
+    arp_phase_rd: int
+    arp_down_src: int
+    arp_down_step: int
+    arp_down_dst: int
+    arp_down_cmp: bool
+    arp_down_hi: int
+    arp_up_src: int
+    arp_up_step: int
+    arp_up_dst: int
+    arp_up_hi: int
+    arp_substep_inc: int
+    arp_speed: int
+    arp_substep_cmp: int
+    arp_substep_clr: int
+    arp_phase_inc: int
     inner_lo: int
     inner_hi: int
     pitch_skip: int
@@ -349,6 +375,9 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
         found[f"{at}_end"] = addr + pattern.length
     found["tempo_reload"] = found["to_reload"] + 1
     found["pulse_always"] = found["to_pulse_sweep"] == found["to_sustain_end_end"]
+    if found["arp_down_op"] not in (STA_ABS_X, CMP_ABS_X):
+        raise MusicAssemblerParseError("player signatures not found (arp descent)")
+    found["arp_down_cmp"] = found["arp_down_op"] == CMP_ABS_X
     for page in ("sid", "res_sid", "fc_sid"):
         found[page] <<= 8
     if found["pitch_skip"] not in (0, 4):

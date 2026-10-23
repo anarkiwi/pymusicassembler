@@ -181,6 +181,19 @@ def test_program_jump_bounds_by_its_own_cell(later_tune_path, bound, row, cursor
     assert player._rd(lay.instr_cursor) == cursor
 
 
+def _arp(player, lo, hi, ascend=0):
+    """One arpeggio step of voice 0 from ``hi:lo`` with step $10 (instrument at FREE)."""
+    lay = player._lay
+    _poke(player, FREE, (0, 0, 0, 0, 0, 0x01, 0x10, 0))
+    _poke(player, lay.arp, (ascend,))
+    player._wr(lay.arp_phase, 0)
+    player._wr(lay.porta_ctr, 0)
+    player._wr(lay.freq_lo_w, lo)
+    player._wr(lay.freq_hi_w, hi)
+    player._arp(0, FREE - lay.instr)
+    return player._rd(lay.freq_lo_w), player._rd(lay.freq_hi_w)
+
+
 @pytest.mark.parametrize(
     "lo,hi,expect",
     [
@@ -190,17 +203,25 @@ def test_program_jump_bounds_by_its_own_cell(later_tune_path, bound, row, cursor
     ],
 )
 def test_arp_descent_below_page_one_is_undone(tune_path, lo, hi, expect):
+    assert _arp(Player(reader.read(tune_path)), lo, hi) == expect
+
+
+@pytest.mark.parametrize("cmp,expect", [(False, (0x41, 0x07)), (True, (0x51, 0x06))])
+def test_arp_descent_compare_leaves_the_low_byte(tune_path, cmp, expect):
+    """A build whose descent ``CMP``s instead of ``STA``s only borrows from the high byte."""
+    player = Player(reader.read(tune_path))
+    player.layout = player._lay = replace(player.layout, arp_down_cmp=cmp)
+    assert _arp(player, 0x51, 0x07) == expect
+
+
+def test_arp_ascent_reads_its_operand_from_the_code(tune_path):
+    """The ascent adds to the cell its ``LDA abs,X`` names when it runs."""
     player = Player(reader.read(tune_path))
     lay = player.layout
-    rec = FREE
-    _poke(player, rec, (0, 0, 0, 0, 0, 0x01, 0x10, 0))
-    _poke(player, lay.arp, (0,))
-    player._wr(lay.arp_phase, 0)
-    player._wr(lay.porta_ctr, 0)
-    player._wr(lay.freq_lo_w, lo)
-    player._wr(lay.freq_hi_w, hi)
-    player._arp(0, rec)
-    assert (player._rd(lay.freq_lo_w), player._rd(lay.freq_hi_w)) == expect
+    assert _arp(player, 0x20, 0x07, ascend=1) == (0x30, 0x07)
+    _poke(player, lay.arp_up_src, (FREE & 0xFF, (FREE >> 8) + 1))
+    player._wr(FREE + 0x100, 0x80)
+    assert _arp(player, 0x20, 0x07, ascend=1) == (0x90, 0x07)
 
 
 def test_odd_vibrato_step_alternates_with_the_plain_note(tune_path):

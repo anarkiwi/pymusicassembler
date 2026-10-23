@@ -5,6 +5,7 @@ import pytest
 from pysidtracker import CodePattern, SidImage
 
 from pymusicassembler import Player, layout, reader
+from pymusicassembler.constants import INSTR_ARP_SPEED, INSTR_ARP_STEP
 from pymusicassembler.errors import MusicAssemblerParseError
 
 SPACE = {
@@ -210,3 +211,35 @@ def test_filter_stores_keep_their_own_sid_page(tune_path):
     at = image.find_code(CodePattern("8D 16 {page}"), start=lay.entry)
     image.poke(at.addr + 2, 0xD5)
     assert layout.discover(image, lay.entry).fc_sid == 0xD500
+
+
+def test_arp_operands_name_the_standard_cells(tune_path):
+    """A standard build's arpeggio code reads the cells the rest of the player uses."""
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+
+    def cell(name):
+        return player._indexed(getattr(lay, f"arp_{name}"), 0)
+
+    assert {cell(n) for n in ("down_src", "down_dst", "up_src", "up_dst")} == {
+        lay.freq_lo_w
+    }
+    assert cell("down_hi") == cell("up_hi") == lay.freq_hi_w
+    assert cell("down_step") == cell("up_step") == lay.instr + INSTR_ARP_STEP
+    assert cell("speed") == lay.instr + INSTR_ARP_SPEED
+    assert cell("porta_dec") == cell("porta_inc") == lay.porta_ctr
+    assert cell("phase_rd") == cell("phase_inc") == lay.arp_phase
+    assert {cell(f"substep_{n}") for n in ("inc", "cmp", "clr")} == {lay.arp_substep}
+    assert not lay.arp_down_cmp
+
+
+@pytest.mark.parametrize("op,cmp", [(0xDD, True), (0x9D, False), (0x8D, None)])
+def test_arp_descent_store_or_compare(tune_path, op, cmp):
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    lay = layout.discover(image, Player(reader.read(tune_path)).layout.entry)
+    image.poke(lay.arp_down_dst - 1, op)
+    if cmp is None:
+        with pytest.raises(MusicAssemblerParseError, match="arp descent"):
+            layout.discover(image, lay.entry)
+    else:
+        assert layout.discover(image, lay.entry).arp_down_cmp is cmp
