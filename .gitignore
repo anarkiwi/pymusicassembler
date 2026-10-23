@@ -231,6 +231,7 @@ __marimo__/
 
 # Local git worktrees for PR work.
 .worktrees/
+.claude/worktrees/
 
 # process core dumps
 core.[0-9]*
