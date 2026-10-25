@@ -154,6 +154,11 @@ def _repack_inner_programs(
 
 def build(song: Song) -> bytes:
     """Serialize ``song`` to a raw Music Assembler C64 image."""
+    if song.layout_post_init:
+        raise SongValidationError(
+            "tune's tables were located only by running its init (packed or "
+            "relocating rip), so it is read-only and cannot be written back"
+        )
     validate(song)
     load = song.load_addr
     image = reader.load_view(song.image, load)
