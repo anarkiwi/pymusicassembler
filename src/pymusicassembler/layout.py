@@ -5,10 +5,20 @@ wave-program commands), so each address is read from the operand of the
 instruction that uses it, in the routine the play entry's control flow reaches.
 """
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from typing import Iterable, Optional, Tuple
 
-from pysidtracker import OP_LEN, CodePattern, Match, SidImage, find_code_all
+from pysidtracker import (
+    OP_LEN,
+    ChainError,
+    CodePattern,
+    Match,
+    RoutineChain,
+    SidImage,
+    code_match_at,
+    find_code_all,
+)
+from pysidtracker.facets import DEFAULT_SOURCE, Entry, Variant, detected, inferred
 
 from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerParseError
@@ -94,7 +104,7 @@ _ROUTINES = (
         " F0 03 8D {program_acc:w} C8 B1 ?? C9",
     ),
 )
-_ROUTINES = tuple((at, CodePattern(spec)) for at, spec in _ROUTINES)
+_CHAIN = RoutineChain(_ROUTINES)
 
 _INIT = CodePattern(
     "A9 ?? 8D 18 ?? A9 ?? 8D 17 ?? 29 0F 8D ?? ?? A2 0F 9D ?? ?? CA 10 FA A2 02"
@@ -112,12 +122,18 @@ VIB_OUT = CodePattern(
 
 # Orderlist step at row_end_end: plain, via a $FD jump hook, or inline $FC/$FD.
 _ORDER_STEPS = tuple(
-    CodePattern(f"{spec} C9 {{order_end}} D0 02 A0 {{order_restart}}")
-    for spec in (
-        "C8 B1 ??",
-        "20 {order_hook:w}",
-        "C8 B1 ?? C9 FC D0 0D C8 B1 ?? 8D {tempo_sta:w} 8D {tempo_sta2:w} C8 4C ?? ??"
-        " C9 FD D0 0B C8 B1 ?? 0A 9D {order_jump:w} A8 4C ?? ??",
+    (
+        name,
+        CodePattern(f"{spec} C9 {{order_end}} D0 02 A0 {{order_restart}}"),
+    )
+    for name, spec in (
+        ("plain", "C8 B1 ??"),
+        ("hook", "20 {order_hook:w}"),
+        (
+            "inline",
+            "C8 B1 ?? C9 FC D0 0D C8 B1 ?? 8D {tempo_sta:w} 8D {tempo_sta2:w} C8 4C ?? ??"
+            " C9 FD D0 0B C8 B1 ?? 0A 9D {order_jump:w} A8 4C ?? ??",
+        ),
     )
 )
 ORDER_HOOK = CodePattern("C8 B1 ?? C9 FD F0 01 60 C8 B1 ?? 0A 9D {order_jump:w} A8")
@@ -230,6 +246,11 @@ class Layout:
     program_jump: int = 0
     pulse_always: bool = False
     output_voices: Tuple[int, ...] = (0, 1, 2)
+    variant: Optional[Variant] = field(default=None, compare=False, repr=False)
+
+    def as_info(self) -> dict:
+        """The build's variant facets and their provenance, for the survey ``info``."""
+        return self.variant.as_info() if self.variant is not None else {}
 
 
 def _as_image(mem) -> SidImage:
@@ -280,15 +301,6 @@ def resolve_entry(mem, play: int, start: int = 0, end: int = 0x10000) -> Optiona
         if found is not None:
             return found
     return min(entries, key=lambda e: abs(e - starts[0]), default=None)
-
-
-def _follow_jmp(image: SidImage, addr: int) -> int:
-    """``addr``, or where the chain of ``JMP abs`` trampolines at it leads."""
-    seen = set()
-    while image.peek(addr) == JMP_ABS and addr not in seen:
-        seen.add(addr)
-        addr = _word(image, addr + 1)
-    return addr
 
 
 def _s8(value: int) -> int:
@@ -351,54 +363,54 @@ def _output_voices(image: SidImage, entry: int, output: int) -> Tuple[int, ...]:
     return tuple(voices)
 
 
-def _match_at(image: SidImage, pattern: CodePattern, addr: int) -> Optional[Match]:
-    hit = find_code_all(image, pattern, start=addr, end=addr + pattern.length)
-    return hit[0] if hit else None
-
-
-def _order_step(image: SidImage, addr: int) -> dict:
-    """The orderlist step's end marker, restart index and command store cells.
+def _order_step(image: SidImage, addr: int) -> Tuple[dict, dict]:
+    """The orderlist step's end marker, restart index and command store cells,
+    and its facet entries.
 
     Unrecognised steps keep the standard ``$FF`` end, restart 0 and no commands.
     """
-    for pattern in _ORDER_STEPS:
-        hit = _match_at(image, pattern, addr)
+    entries = {
+        "order_step": Entry("unrecognised", DEFAULT_SOURCE),
+        "order_tempo": Entry(False, DEFAULT_SOURCE),
+        "order_jump": Entry(False, DEFAULT_SOURCE),
+    }
+    for name, pattern in _ORDER_STEPS:
+        hit = code_match_at(image, pattern, addr)
         if hit is None:
             continue
         found = dict(hit.captures)
+        entries["order_step"] = Entry(name, detected(addr))
         if "tempo_sta" in found:
             found["order_tempo"] = (found.pop("tempo_sta"), found.pop("tempo_sta2"))
+            entries["order_tempo"] = Entry(True, detected(addr))
+        if "order_jump" in found:
+            entries["order_jump"] = Entry(True, detected(addr))
         if "order_hook" in found:
-            hook = _match_at(image, ORDER_HOOK, found.pop("order_hook"))
+            hook_addr = found.pop("order_hook")
+            hook = code_match_at(image, ORDER_HOOK, hook_addr)
             if hook is not None:
                 found["order_jump"] = hook.captures["order_jump"]
-        return found
-    return {}
+                entries["order_jump"] = Entry(True, detected(hook_addr))
+        return found, entries
+    return {}, entries
 
 
 def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     """The :class:`Layout` of the player whose play entry is at ``entry``.
 
     Raises :class:`MusicAssemblerParseError` when a routine is not where the
-    player's control flow leads.
+    player's control flow leads. ``Layout.variant`` records where each fallback
+    (init, orderlist step, ``program_jump``, ``transrep_byte``, ``vib_out``)
+    was detected or defaulted.
     """
     image = _as_image(mem)
-    found = {"entry": entry}
-    for at, pattern in _ROUTINES:
-        addr = _follow_jmp(image, found[at])
-        hit = _match_at(image, pattern, addr)
-        if hit is None:
-            raise MusicAssemblerParseError(
-                f"player signatures not found ({at} at {addr:#06x}); unsupported variant"
-            )
-        for name, offset, _ in pattern.captures:
-            value = hit.captures[name]
-            if name[:3] == "to_":
-                value = addr + offset + 1 + _s8(value)
-            elif name[:3] == "at_":
-                name, value = name[3:], addr + offset
-            found[name] = value
-        found[f"{at}_end"] = addr + pattern.length
+    try:
+        found = _CHAIN.discover(image, entry)
+    except ChainError as exc:
+        raise MusicAssemblerParseError(
+            f"player signatures not found ({exc.name} at {exc.addr:#06x});"
+            " unsupported variant"
+        ) from exc
     found["pulse_always"] = found["to_pulse_sweep"] == found["to_sustain_end_end"]
     if found["arp_down_op"] not in (STA_ABS_X, CMP_ABS_X):
         raise MusicAssemblerParseError("player signatures not found (arp descent)")
@@ -408,26 +420,48 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     if found["pitch_skip"] not in (0, 4):
         raise MusicAssemblerParseError("player signatures not found (pitch_skip)")
     inits = find_code_all(image, _INIT, start=start, end=end)
-    found["init"] = min(
-        (m.addr for m in inits), key=lambda a: abs(a - entry), default=0
+    init = min(inits, key=lambda m: abs(m.addr - entry), default=None)
+    found["init"] = init.addr if init else 0
+    order, entries = _order_step(image, found["row_end_end"])
+    found.update(order)
+    entries["init"] = Entry(
+        found["init"], detected(init.addr) if init else DEFAULT_SOURCE
     )
-    found.update(_order_step(image, found["row_end_end"]))
-    hit = _match_at(image, PROGRAM_JUMP_CODE, found["program_end"] - 1)
+    hit = code_match_at(image, PROGRAM_JUMP_CODE, found["program_end"] - 1)
     found["program_jump"] = hit.captures["cell"] if hit else 0
+    entries["program_jump"] = Entry(
+        bool(hit), detected(hit.addr) if hit else DEFAULT_SOURCE
+    )
     for hit in find_code_all(image, TRANSREP_BYTE, start=start, end=end):
         if hit.captures["repeat"] == found["repeat"]:
             found["transrep_byte"] = hit.captures["cell"]
+            source = detected(hit.addr)
             break
     else:
         found["transrep_byte"] = found["transrep"]
-    found["vib_out_lo"], found["vib_out_hi"] = next(
+        source = inferred("transrep cell")
+    entries["transrep_byte"] = Entry(found["transrep_byte"], source)
+    vib = next(
         (
-            (m.captures["lo"], m.captures["hi"])
+            m
             for m in find_code_all(image, VIB_OUT, start=start, end=end)
             if (m.captures["step"], m.captures["toggle"])
             == (found["vib_lo_step"], found["vib_toggle"])
         ),
-        (found["vib_freq_lo"], found["vib_freq_hi"]),
+        None,
     )
+    if vib:
+        found["vib_out_lo"], found["vib_out_hi"] = (
+            vib.captures["lo"],
+            vib.captures["hi"],
+        )
+        entries["vib_out"] = Entry(True, detected(vib.addr))
+    else:
+        found["vib_out_lo"], found["vib_out_hi"] = (
+            found["vib_freq_lo"],
+            found["vib_freq_hi"],
+        )
+        entries["vib_out"] = Entry(False, inferred("vib_freq cells"))
     found["output_voices"] = _output_voices(image, entry, found["output"])
+    found["variant"] = Variant(entries)
     return Layout(**{f.name: found[f.name] for f in fields(Layout) if f.name in found})

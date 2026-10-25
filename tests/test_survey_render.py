@@ -27,7 +27,7 @@ def test_render_matches_player(tune_path):
         "load_offset": 0x21,
         "relocated": False,
         "tempo": 2,
-        "features": info["features"],
+        **Player(reader.parse(data)).layout.as_info(),
         "rsid": False,
         "trigger": "pal_video",
         "speed": 1,
