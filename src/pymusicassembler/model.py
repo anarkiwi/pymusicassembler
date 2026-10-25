@@ -350,6 +350,8 @@ class Song:
     image: bytes = b""
     # Original PSID/RSID container bytes before the image; empty for a bare ``.prg``.
     container_header: bytes = b""
+    # True when the tables were found only by running init (packed/relocating rip): readable, but not writable.
+    located_after_init: bool = False
 
     def apply_preset_bank(self, bank: PresetBank) -> None:
         """Swap in the bank's presets and arpeggios.

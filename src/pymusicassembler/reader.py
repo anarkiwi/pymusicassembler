@@ -297,18 +297,20 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
 
 
 def _locate(image: bytes, load: int, init: Optional[int], play: int):
-    """``(view, layout)``: the loaded image, else memory after the tune's init.
+    """``(view, layout, static)``: the loaded image, else memory after the tune's init.
+
+    ``static`` is False when the layout was only found by running init.
 
     ``init`` ``None`` (a bare image) allows only the static view.
     """
     img = load_view(image, load)
     try:
-        return img, discover_layout(img, play, load, load + len(image))
+        return img, discover_layout(img, play, load, load + len(image)), True
     except MusicAssemblerParseError:
         if init is None:
             raise
     player = Player(Song(load_addr=load, init_addr=init, play_addr=play, image=image))
-    return load_view(player.memory, 0), player.layout
+    return load_view(player.memory, 0), player.layout, False
 
 
 def parse(data: bytes) -> Song:
@@ -326,7 +328,7 @@ def parse(data: bytes) -> Song:
             "the player reads live I/O and the file cannot produce its stored music)"
         )
     sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
-    img, lay = _locate(image, load, init if sid else None, play)
+    img, lay, static = _locate(image, load, init if sid else None, play)
     if not sid:
         init, play = lay.init, lay.entry
     bases = {name: getattr(lay, name) for name in _TABLES}
@@ -376,6 +378,7 @@ def parse(data: bytes) -> Song:
         inner_programs=inner_programs,
         image=image,
         container_header=header,
+        located_after_init=not static,
     )
 
 
