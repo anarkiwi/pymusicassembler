@@ -210,6 +210,6 @@ def test_write_rejects_unknown_container(tune_path, tmp_path):
 
 
 def test_build_rejects_song_located_only_after_init():
-    song = Song(located_after_init=True)
+    song = Song(layout_post_init=True)
     with pytest.raises(SongValidationError, match="read-only"):
         writer.build(song)
