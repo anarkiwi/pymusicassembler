@@ -40,14 +40,15 @@ of every HVSC tune SIDId names `Music_Assembler` or `(Music_Assembler/MC)`
 reports the decoded build: `load_offset` (image load address minus the nominal
 player base, the play entry less `$21`: `0`, or `33` for a rip starting at the
 play routine), `relocated` (base other than `$1000`), `tempo` (the play-call
-divider reload after init), `features` (the build's `order_tempo`,
-`order_jump` and `program_jump` commands), and `pysidtracker.cadence_info`'s
+divider reload after init), `Layout.as_info()`'s facets, each with a `<facet>.src`
+provenance (`order_step`, `order_tempo`, `order_jump`, `program_jump`,
+`transrep_byte`, `vib_out`, `init`), and `pysidtracker.cadence_info`'s
 `rsid`, play `trigger`, `speed` (calls per PAL frame) and `dynamic`. A tune the
 reader cannot decode raises `MusicAssemblerParseError` (a
 `pysidtracker.SidParseError`), which the survey records as `not_decompiled`.
 
 ```bash
-pip install "pysidtracker[survey]>=0.37.0"
+pip install "pysidtracker[survey]>=0.38.0"
 python -m pysidtracker.survey find $HVSC --player '^\(?music_assembler(/mc)?\)?$' --out .hvsc-survey/tunes.csv
 PYTHONPATH=scripts python -m pysidtracker.survey run $HVSC .hvsc-survey/tunes.csv \
     --work .hvsc-survey --render oracle_hvsc:render --jobs 16

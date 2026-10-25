@@ -12,7 +12,6 @@ from pymusicassembler import Player, parse
 from pymusicassembler.constants import DEFAULT_LOAD, NATIVE_PLAY_OFFSET
 
 STANDARD_BASE = DEFAULT_LOAD - NATIVE_PLAY_OFFSET
-FEATURES = ("order_tempo", "order_jump", "program_jump")
 
 PLAYER = r"^\(?music_assembler(/mc)?\)?$"
 
@@ -25,7 +24,7 @@ def render(data, song, nframes):
         "load_offset": tune.load_addr - player.base,
         "relocated": player.base != STANDARD_BASE,
         "tempo": player.tempo_reload,
-        "features": "+".join(f for f in FEATURES if getattr(player.layout, f)),
     }
+    info.update(player.layout.as_info())
     info.update(cadence_info(data, song))
     return np.asarray(player.render_grid(nframes), np.int16), info

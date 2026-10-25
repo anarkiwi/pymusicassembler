@@ -28,9 +28,8 @@ def _locate(image, start, end):
         lay = discover(image, entry, start, end)
     except MusicAssemblerParseError as exc:
         return entry, str(exc)[:60]
-    feats = [
-        f for f in ("order_tempo", "order_jump", "program_jump") if getattr(lay, f)
-    ]
+    info = lay.as_info()
+    feats = [f for f in ("order_tempo", "order_jump", "program_jump") if info[f]]
     return entry, "+".join(["ok"] + feats)
 
 
