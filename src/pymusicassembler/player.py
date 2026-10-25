@@ -119,6 +119,9 @@ class Player(EmuPlayer):
     def _init(self, subtune: int) -> None:
         self._boot(subtune)
         self._bus = self._obs._subject
+        if self._song.layout_post_init:
+            self.layout = self._lay = self._song.layout
+            return
         play = self._song.play_addr
         lay = self._probe(play) if play else None
         if lay is None:

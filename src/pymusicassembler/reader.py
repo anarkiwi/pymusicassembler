@@ -10,11 +10,9 @@ from pysidtracker import (
     PSID_MAGIC,
     RSID_MAGIC,
     BaseSidParser,
-    CodePattern,
     Match,
     SidError,
     SidImage,
-    find_code_all,
     read_bytes,
 )
 
@@ -117,16 +115,13 @@ def image_in_io_area(load: int, length: int) -> bool:
     return load < end and load + length > start
 
 
-_PAT_PLAY = CodePattern("A2 00 CE {tempo:w} 30 0C 20 26")
-
-
 def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
     """The native-layout play entry, whose tempo cell is ``base + $90``.
 
     A genuine native image loads at ``base`` or ``base + $21``.
     """
     end = load + image_len
-    for match in find_code_all(image, _PAT_PLAY, start=load, end=end):
+    for match in layout.play_entries(image, load, end):
         base = match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
         if load - base in (0, constants.NATIVE_PLAY_OFFSET):
             return match
@@ -297,18 +292,18 @@ def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
 
 
 def _locate(image: bytes, load: int, init: Optional[int], play: int):
-    """``(view, layout)``: the loaded image, else memory after the tune's init.
+    """``(view, layout, post_init)``: the loaded image, else memory after init.
 
     ``init`` ``None`` (a bare image) allows only the static view.
     """
     img = load_view(image, load)
     try:
-        return img, discover_layout(img, play, load, load + len(image))
+        return img, discover_layout(img, play, load, load + len(image)), False
     except MusicAssemblerParseError:
         if init is None:
             raise
     player = Player(Song(load_addr=load, init_addr=init, play_addr=play, image=image))
-    return load_view(player.memory, 0), player.layout
+    return load_view(player.memory, 0), player.layout, True
 
 
 def parse(data: bytes) -> Song:
@@ -326,7 +321,7 @@ def parse(data: bytes) -> Song:
             "the player reads live I/O and the file cannot produce its stored music)"
         )
     sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
-    img, lay = _locate(image, load, init if sid else None, play)
+    img, lay, post_init = _locate(image, load, init if sid else None, play)
     if not sid:
         init, play = lay.init, lay.entry
     bases = {name: getattr(lay, name) for name in _TABLES}
@@ -376,6 +371,8 @@ def parse(data: bytes) -> Song:
         inner_programs=inner_programs,
         image=image,
         container_header=header,
+        layout=lay,
+        layout_post_init=post_init,
     )
 
 
