@@ -18,7 +18,7 @@ from pysidtracker import SidParseError, wire_mpu
 from pysidtracker.irqhost import InterruptPlayer
 from pysidtracker.oracle import PAL_FLAG
 from pysidtracker.registers import AD, CTRL, FC_HI, FREQ_HI, FREQ_LO, PW_HI, PW_LO
-from pysidtracker.registers import RES_FILT, SR, sid_model_for_flags
+from pysidtracker.registers import SR, sid_model_for_flags
 
 from pymusicassembler import constants, layout
 from pymusicassembler.errors import MusicAssemblerParseError
@@ -119,7 +119,7 @@ class Player(EmuPlayer):
     def _init(self, subtune: int) -> None:
         self._boot(subtune)
         self._bus = self._obs._subject
-        if self._song.layout_post_init:
+        if self._song.layout_post_init and subtune == self._song.layout_subtune:
             self.layout = self._lay = self._song.layout
             return
         play = self._song.play_addr
@@ -289,10 +289,7 @@ class Player(EmuPlayer):
             res = self._rd(pat + y)
             if res:
                 self._wr(lay.fc_ctr_reset, res)
-            self._wr(
-                lay.res_sid + RES_FILT,
-                self._rd(lay.res_presets + v) if res else 0xF0,
-            )
+            self._wr(lay.res_sta, self._rd(lay.res_presets + v) if res else 0xF0)
         elif ctl & constants.CTL_VIBARP:
             y = (y + 1) & 0xFF
             self._wr(lay.vib_lo_step + v, self._rd(pat + y))

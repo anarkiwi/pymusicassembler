@@ -328,8 +328,9 @@ def _stored_instruments(lay: "layout.Layout", end: int, data: Iterable[int]) -> 
     return min(-(-(end - lay.instr) // size), constants.INSTR_COUNT)
 
 
-def _locate(image: bytes, load: int, init: Optional[int], play: int):
-    """``(view, layout, post_init)``: the loaded image, else memory after init.
+def _locate(image: bytes, load: int, init: Optional[int], play: int, subtune: int = 0):
+    """``(view, layout, post_init)``: the loaded image, else memory after init
+    of 0-based ``subtune``.
 
     ``init`` ``None`` (a bare image) allows only the static view.
     """
@@ -339,15 +340,17 @@ def _locate(image: bytes, load: int, init: Optional[int], play: int):
     except MusicAssemblerParseError:
         if init is None:
             raise
-    player = Player(Song(load_addr=load, init_addr=init, play_addr=play, image=image))
+    song = Song(load_addr=load, init_addr=init, play_addr=play, image=image)
+    player = Player(song, subtune)
     return load_view(player.memory, 0), player.layout, True
 
 
-def parse(data: bytes) -> Song:
+def parse(data: bytes, subtune: int = 0) -> Song:
     """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song.
 
     A player whose tables lie outside the loaded image is read after its init
-    runs in the emulator (packed or relocating rips).
+    runs in the emulator for 0-based ``subtune`` (packed or relocating rips,
+    or a rip whose init selects one of several players per subtune).
     """
     load, init, play, name, author, released, image, header = _parse_container(data)
     if image_in_io_area(load, len(image)):
@@ -358,7 +361,7 @@ def parse(data: bytes) -> Song:
             "the player reads live I/O and the file cannot produce its stored music)"
         )
     sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
-    img, lay, post_init = _locate(image, load, init if sid else None, play)
+    img, lay, post_init = _locate(image, load, init if sid else None, play, subtune)
     if not sid:
         init, play = lay.init, lay.entry
     bases = {name: getattr(lay, name) for name in TABLES}
@@ -422,12 +425,13 @@ def parse(data: bytes) -> Song:
         container_header=header,
         layout=lay,
         layout_post_init=post_init,
+        layout_subtune=subtune,
     )
 
 
-def read(src) -> Song:
+def read(src, subtune: int = 0) -> Song:
     """Read a Music Assembler tune from a path, bytes, or file-like object."""
-    return parse(read_bytes(src))
+    return parse(read_bytes(src), subtune)
 
 
 def parse_presets(data: bytes) -> PresetBank:
@@ -467,7 +471,7 @@ class MusicAssemblerSidParser(BaseSidParser):
     error_class = MusicAssemblerParseError
 
     def parse(self, data: bytes, **kwargs) -> Song:
-        return parse(data)
+        return parse(data, kwargs.get("subtune", 0))
 
     def recognize(self, image: SidImage) -> object:
         """The play-entry address if a whole MA player is in the loaded region.

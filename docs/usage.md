@@ -50,7 +50,10 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  #
 
 ## Public API
 
-- `read(src) -> Song` / `parse(bytes) -> Song` — read a `.sid`/`.prg`.
+- `read(src, subtune=0) -> Song` / `parse(bytes, subtune=0) -> Song` — read a
+  `.sid`/`.prg`. A player found only after init is read from the memory init
+  leaves for 0-based `subtune` (a rip whose init selects a different player
+  per subtune decodes only the subtunes that select Music Assembler).
 - `read_presets(src) -> PresetBank` / `parse_presets(bytes)` — read the
   editor's `P.` preset bank (the 768-byte `$4300` body, with or without its
   load prefix).
@@ -65,7 +68,7 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  #
 - `build(song) -> bytes` — the raw C64 image; `build_native(song, base=None) ->
   bytes` — the native self-starting image body in the editor's layout (see
   [format.md](format.md#s-songs-containernative)); `validate(song)`.
-- `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`. A `.sid`
+- `Player(song, subtune=0)` — `.play_frame() -> list[(reg, val)]`, `.regs`. A `.sid`
   with play address 0 plays every interrupt its init installs (raster, CIA
   IRQs, NMI digis, a main loop) on `pysidtracker.irqhost.InterruptPlayer`,
   one frame per play-source raise as the oracle frames it.

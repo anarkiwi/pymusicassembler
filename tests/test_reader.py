@@ -6,7 +6,7 @@ import pytest
 
 from pysidtracker import SidImage, write_psid
 
-from pymusicassembler import constants, reader, writer
+from pymusicassembler import Player, constants, reader, writer
 from pymusicassembler.errors import SidParseError
 from pymusicassembler.model import Arpeggio, ArpeggioRow, Instrument, Pattern
 from pymusicassembler.reader import parse, read
@@ -210,6 +210,21 @@ def test_relocating_rip_is_recognised(tune_path):
     parser = reader.MusicAssemblerSidParser()
     image = SidImage.from_bytes(relocating_rip(song))
     assert parser.recognize(image) is not None
+
+
+def test_post_init_layout_is_read_for_the_subtune(tune):
+    """Init picks one of several players per subtune; only song 12 runs Music Assembler."""
+    data = tune("MUSICIANS/M/MC_Lord/Cosmox.sid").read_bytes()
+    song = parse(data, 11)
+    assert song.layout_post_init and song.layout.entry == 0x1021
+    assert Player(song, 11).layout == song.layout
+    for subtune in (0, 1):
+        with pytest.raises(SidParseError, match="unsupported variant"):
+            parse(data, subtune)
+    with pytest.raises(SidParseError, match="unsupported variant"):
+        Player(song, 0)
+    parser = reader.MusicAssemblerSidParser()
+    assert parser.parse(data, subtune=11).layout == song.layout
 
 
 def test_relocating_prg_without_init_is_rejected(tune_path):

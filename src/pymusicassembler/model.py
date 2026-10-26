@@ -368,9 +368,11 @@ class Song:
     # Original PSID/RSID container bytes before the image; empty for a bare ``.prg``.
     container_header: bytes = b""
     # The player layout the reader located, and whether it was found in memory
-    # after init ran (not in the static image); ``Player`` reuses it only then.
+    # after init of ``layout_subtune`` ran (not in the static image); ``Player``
+    # reuses it only for that subtune.
     layout: Any = field(default=None, repr=False, compare=False)
     layout_post_init: bool = field(default=False, repr=False, compare=False)
+    layout_subtune: int = field(default=0, repr=False, compare=False)
 
     def apply_preset_bank(self, bank: PresetBank) -> None:
         """Swap in the bank's presets and arpeggios.

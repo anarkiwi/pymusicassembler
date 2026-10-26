@@ -28,6 +28,8 @@ supports, each confirmed byte-exact against the deterministic sidtrace oracle:
 * Sustain program table in a C64 ROM bank, which the PSID driver's iomap
   banks the ROM-less set (0xEA kernal, zero basic) over: greece_ha,
   shifting_gear (``$5000``).
+* Resonance stored to a SID mirror (``$D430``, aliasing voice 3's pulse-width
+  low): crumb.
 
 Each tune is rendered over the ``SECONDS`` window -- far deeper than an opening
 window -- so the comparison spans multiple orderlist loop points (a regression
@@ -70,6 +72,8 @@ TUNES = {
     # Program table reading the C64 ROM banks (the driver's ROM-less iomap).
     "greece_ha": "MUSICIANS/D/Dr_Rox/Greece_Ha.sid",
     "shifting_gear": "MUSICIANS/M/MC/Shifting_Gear.sid",
+    # Resonance stored to a SID mirror ($D430 aliases $D410).
+    "crumb": "MUSICIANS/S/Spratt/Crumb.sid",
     # Rips of the editor S. files tests/test_editor_files.py renders against.
     "parallax": "MUSICIANS/M/MC/Parallax.sid",
     "untouched": "MUSICIANS/M/MC/Untouched.sid",

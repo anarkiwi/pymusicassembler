@@ -241,6 +241,7 @@ supported player variation, each **byte-exact (residual 0)**:
 | Image loads at the player base (`load == base`) | Acid Mix | `$1000` / `$1000` |
 | Relocated player (`base != $1000`) | Corvus, Dr Doom, Kasza-Nota | `$2e00` / `$1200` / `$1500` |
 | Native self-start song wrapped in PSID (`$78` stub) | Eastern Promise | `$1b00` / `$1b00` |
+| Resonance stored to a SID mirror (`$D430`) | Crumb | `$1000` / `$1100` |
 
 `tests/test_oracle_songs.py` renders one tune per player feature for its whole
 HVSC song length:

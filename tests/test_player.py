@@ -399,7 +399,7 @@ def test_registers_are_written_to_the_players_sid(tune_path):
 def test_filter_is_written_to_its_own_sid_page(tune_path):
     player = Player(reader.read(tune_path))
     lay = player._lay = replace(
-        player.layout, sid=FREE + 0x200, res_sid=0xD500, fc_sid=0xD600
+        player.layout, sid=FREE + 0x200, res_sta=0xD517, fc_sid=0xD600
     )
     pat = FREE
     shadow = [player._rd(FREE + 0x215 + r) for r in range(4)]
