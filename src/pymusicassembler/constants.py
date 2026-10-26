@@ -57,6 +57,7 @@ CTL_DUR_MASK = 0x1F
 
 # Instrument record byte offsets (8-byte record).
 INSTR_RECORD_SIZE = 8
+INSTR_COUNT = 32  # the editor's preset table: ids $80-$9F
 INSTR_AD = 0
 INSTR_SR = 1
 INSTR_WAVEFORM = 2
@@ -111,4 +112,6 @@ NATIVE_INIT_OFFSET = 0x48
 NATIVE_IRQ_OFFSET = 0x18
 NATIVE_TEMPO_OFFSET = 0x90
 NATIVE_STUB_LEN = 0x21  # bytes the self-start stub occupies (base..base+$20)
+NATIVE_BASE_MIN = 0x0400  # the editor relocates a song anywhere in $0400-$FF00
+NATIVE_BASE_MAX = 0xFF00
 NATIVE_IRQ_EXIT = 0xEA31  # KERNAL IRQ return the stub's handler jumps to

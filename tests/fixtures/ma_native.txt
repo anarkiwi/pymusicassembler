@@ -3,3 +3,9 @@
 # release_id<TAB>name<TAB>sha256<TAB>description
 94388	P.	eb03ea4969781f527ac132552fb6af669f16d8627692f27ccf441ed2d968b6b1	release P. preset bank (770 bytes, load $4300)
 94388	S.FOR SHAPE	28a7d9fd5654b0264273eb162864378788635ac3d9863a9e77cf0e071d85df03	release S. song; presets 2-14 of P. equal its instruments 2-14
+94388	s.action_biker	d5b1e0de629871ea0e70cb42352fdf73da6c1a505e29f68fd48c2682634ff60f	editor S. song at $5000; HVSC MUSICIANS/M/MC/Action_Biker.sid
+94388	s.dutch_usa_song	839b44f177013bc6dcc728790d6b6aada486bfac7bc99788186ea4f65475316a	editor S. song at $6800, partial last preset record; HVSC MUSICIANS/M/MC/Untouched.sid
+94388	s.game_killer	4fba14e0ae27a0b1cbb3223ded551903712c2546a842a5bea93365875dcae1b2	editor S. song at $5000; HVSC MUSICIANS/M/MC/Game_Killer.sid
+94388	s.parallax	d3eaea1b22867c527a215b50129249135e7470a1f9dd0832f85b992e60a44e99	editor S. song at $C000, unreferenced stored patterns; HVSC MUSICIANS/M/MC/Parallax.sid
+94388	s.untouched_____	5a95ea235676e957937ae184c02733ec4b0eb27200e6cf66afc31ee8a6da54d9	s.dutch_usa_song as the editor saved it relocated to $C000
+94388	s.musix_05	4390e89914f7ecdec44289fdb29aede5f725fb4d598c19abf2b85b8ffce8508b	editor S. song at $1500

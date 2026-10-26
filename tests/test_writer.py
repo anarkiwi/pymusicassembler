@@ -92,9 +92,7 @@ def test_edit_pattern_changes_image(tune_path):
     ],
 )
 def test_orderlist_bytes_emits_exactly_its_terminator(orderlist, expected):
-    assert (
-        writer._orderlist_bytes(orderlist) == expected
-    )  # pylint: disable=protected-access
+    assert orderlist.to_bytes() == expected
 
 
 def test_silence_terminator_round_trips_byte_exact(silence_tune_path):

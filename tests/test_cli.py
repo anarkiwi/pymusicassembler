@@ -42,6 +42,16 @@ def test_resave_native(tune_path, tmp_path):
     assert reader.read(out).patterns == reader.read(tune_path).patterns
 
 
+def test_resave_native_relocated(tune_path, tmp_path):
+    from pymusicassembler import reader
+
+    out = tmp_path / "song.prg"
+    argv = ["resave", str(tune_path), str(out), "--container", "native"]
+    assert cli.main(argv + ["--base", "$2000"]) == 0
+    assert out.read_bytes()[:2] == b"\x00\x20"
+    assert reader.read(out).patterns == reader.read(tune_path).patterns
+
+
 def test_error_exit_code(tmp_path):
     missing = tmp_path / "nope.sid"
     assert cli.main(["info", str(missing)]) == 1

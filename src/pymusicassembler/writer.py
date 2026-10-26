@@ -12,30 +12,26 @@ layout), so a song read from an image round-trips byte-for-byte
 edited song produces a valid, playable image.
 
 ``build`` returns the raw C64 image (the player + data, no load-address
-prefix).  ``write`` wraps it as a PSID container, a bare ``.prg``, or the
-native Music Assembler editor song format (``container="native"``): the
-player+data image at its base with a self-starting IRQ-install stub in
-place of the PSID header -- the ``S.`` files the Triad editor loads.
+prefix).  ``write`` wraps it as a PSID container or a bare ``.prg``, or
+emits the editor's ``S.`` song (``container="native"``), which
+:mod:`pymusicassembler.native` assembles in the editor's layout at any base.
 """
 
-import struct
 from pathlib import Path
-from typing import Tuple
+from typing import Optional
 
 from pysidtracker import SidError, SidImage, write_psid
 
-from pymusicassembler import constants, reader
+from pymusicassembler import constants, native, reader
 from pymusicassembler.errors import SidParseError, SongValidationError
-from pymusicassembler.model import Orderlist, PresetBank, Song
+from pymusicassembler.model import PresetBank, Song
 
 
 def _put(image: SidImage, addr: int, values) -> None:
     """Write ``values`` into ``image`` at absolute address ``addr``.
 
-    Writes past the current end grow the image (a table read past the
-    source's end -- e.g. an instrument whose record the source truncated --
-    is zero-filled by the reader and re-emitted in full); a write before
-    the base is a corrupt pointer and raises :class:`SongValidationError`.
+    Writes past the current end grow the image; a write before the base is
+    a corrupt pointer and raises :class:`SongValidationError`.
     """
     try:
         image.poke_bytes(addr, bytes(v & 0xFF for v in values))
@@ -68,25 +64,6 @@ def validate(song: Song) -> None:
             entry.control_byte()  # range-checks transpose/repeat
 
 
-def _orderlist_bytes(orderlist: Orderlist) -> bytes:
-    """An orderlist's on-disk bytes: its entries plus exactly its terminator.
-
-    A ``$FF`` terminator is appended; a ``$FE`` silence is the last entry's
-    single pattern-id byte; a ``$FD n`` jump is the last entry's two bytes;
-    a silence or jump is never padded with a ``$FF``.
-    """
-    out = []
-    last = len(orderlist.entries) - 1
-    for i, entry in enumerate(orderlist.entries):
-        if i == last and orderlist.terminator == constants.SILENCE_PATTERN:
-            out.append(entry.pattern_id & 0xFF)
-        else:
-            out.extend((entry.pattern_id & 0xFF, entry.control_byte()))
-    if orderlist.terminator == constants.ORDER_END:
-        out.append(constants.ORDER_END)
-    return bytes(out)
-
-
 def _repack_inner_programs(
     image: SidImage, bases: dict, load: int, image_len: int, inner_programs
 ) -> None:
@@ -112,7 +89,7 @@ def _repack_inner_programs(
     pack_end = end
     if anchored:
         pack_end = max(
-            original[i] + len(reader._parse_program(image, original[i], end).to_bytes())
+            original[i] + len(reader.parse_program(image, original[i], end).to_bytes())
             for i in anchored
         )
     cursor = min((original[i] for i in anchored), default=image.end)
@@ -145,7 +122,7 @@ def _repack_inner_programs(
         if not (ptr and load <= ptr < end):
             continue
         try:
-            reader._parse_program(image, ptr, end)
+            reader.parse_program(image, ptr, end)
         except SidParseError:
             continue
         _put(image, lo + i, (0,))
@@ -170,7 +147,7 @@ def build(song: Song) -> bytes:
     # Orderlists: re-emit each voice's entries and exact terminator at its pointer address.
     for voice, orderlist in enumerate(song.orderlists):
         addr = image.ptr(bases["order_lo"], bases["order_hi"], voice)
-        _put(image, addr, _orderlist_bytes(orderlist))
+        _put(image, addr, orderlist.to_bytes())
 
     # Patterns: write each pattern's raw bytes + terminator at its address.
     for pattern_id, pattern in enumerate(song.patterns):
@@ -194,71 +171,30 @@ def build(song: Song) -> bytes:
     # Arpeggio (inner) programs + their pointer-table entries.
     _repack_inner_programs(image, bases, load, len(song.image), song.inner_programs)
 
-    return image.to_prg()[2:]
+    return _trim_zero_fill(image.to_prg()[2:], len(song.image))
 
 
-# The 33-byte Music Assembler self-start / IRQ-install stub, as base $0000
-# (init=$0048, IRQ vector=$0018, play=$0021).  Disassembly:
-#   SEI; JSR init; LDA #<irq; LDY #>irq; STA $0314; STY $0315   (IRQ vector)
-#   INX; STX $DC0E; INX; STX $D01A; CLI; RTS                    (start timer)
-#   INC $D019; JSR play; JMP $EA31                              (IRQ handler)
-# Only the three embedded addresses relocate with the base.
-_NATIVE_STUB = bytes.fromhex(
-    "78204800a918a0008d14038c1503e88e0edce88e1ad05860ee19d02021004c31ea"
-)
+def _trim_zero_fill(image: bytes, source_len: int) -> bytes:
+    """``image`` without the zero bytes it gained past the source's end.
 
-
-def _native_stub(base: int) -> bytes:
-    """The self-start stub relocated to ``base`` (see :data:`_NATIVE_STUB`)."""
-    stub = bytearray(_NATIVE_STUB)
-    stub[2:4] = struct.pack("<H", base + constants.NATIVE_INIT_OFFSET)
-    irq = base + constants.NATIVE_IRQ_OFFSET
-    stub[5], stub[7] = irq & 0xFF, irq >> 8
-    stub[28:30] = struct.pack("<H", base + constants.NATIVE_PLAY_OFFSET)
-    return bytes(stub)
-
-
-def _native(song: Song) -> Tuple[int, bytes]:
-    """Return ``(base, body)`` for the native self-starting song image.
-
-    ``base`` is the load address the native ``.prg`` takes; ``body`` is the
-    self-start stub followed by the player+data from the play routine
-    onward.  Raises :class:`SongValidationError` when the player is not at a
-    standard Music Assembler layout (so the stub's fixed entry offsets would
-    not line up).
+    The reader zero-fills a record the source truncates (the editor saves
+    its preset table up to the last non-zero byte), so those zeros are not
+    re-emitted and ``build(read(image)) == image``.
     """
-    image = build(song)
-    view = reader.load_view(song.image, song.load_addr)
-    base = reader.find_player_base(view, song.load_addr, len(song.image))
-    if base is None:
-        raise SongValidationError(
-            "player is not at a standard Music Assembler layout; "
-            "cannot emit the native editor format"
-        )
-    body = (
-        _native_stub(base)
-        + image[base + constants.NATIVE_PLAY_OFFSET - song.load_addr :]
-    )
-    if reader.image_in_io_area(base, len(body)):
-        raise SongValidationError(
-            f"native base [{base:#06x},{base + len(body):#06x}) reaches the C64 I/O "
-            f"area {constants.IO_AREA[0]:#06x}-{constants.IO_AREA[1] - 1:#06x}; a C64 "
-            "runs this data as live I/O, so the editor format cannot be emitted here"
-        )
-    return base, body
+    return image[: max(source_len, len(image.rstrip(b"\0")))]
 
 
-def build_native(song: Song) -> bytes:
-    """Serialize ``song`` to a native Music Assembler editor song image.
+def build_native(song: Song, base: Optional[int] = None) -> bytes:
+    """Serialize ``song`` to the native editor song body, relocated to ``base``.
 
-    The body (no load-address prefix) is the self-start stub + player +
-    data; it loads at the base :func:`_native` reports, which
-    :func:`write` prefixes for the ``"native"`` container.
+    No load-address prefix: :func:`write` adds it for ``container="native"``.
+    ``base`` defaults to the source's player base (see :mod:`~pymusicassembler.native`).
     """
-    return _native(song)[1]
+    validate(song)
+    return native.assemble(song, base)[1]
 
 
-def write(song: Song, dst, container: str = "auto") -> Path:
+def write(song: Song, dst, container: str = "auto", base: Optional[int] = None) -> Path:
     """Write ``song`` to ``dst``.
 
     ``container`` is ``"auto"`` (default: re-emit the original container
@@ -266,10 +202,11 @@ def write(song: Song, dst, container: str = "auto") -> Path:
     else synthesize a PSID), ``"psid"`` (always synthesize a PSID header),
     ``"prg"`` (a bare load-address-prefixed image), or ``"native"`` (the
     Music Assembler editor ``S.`` song: a self-starting ``.prg`` the Triad
-    editor loads).
+    editor loads, relocated to ``base``; default the source's player base).
     """
     if container == "native":
-        base, body = _native(song)
+        validate(song)
+        base, body = native.assemble(song, base)
         blob = bytes((base & 0xFF, base >> 8)) + body
         Path(dst).write_bytes(blob)
         return Path(dst)

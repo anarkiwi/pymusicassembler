@@ -89,6 +89,12 @@ def _native(name: str) -> Path:
 
 
 @pytest.fixture
+def editor_file():
+    """``editor_file(name)``: a cached editor-saved file pinned in the manifest."""
+    return _native
+
+
+@pytest.fixture
 def preset_bank_path():
     """The release ``P.`` preset bank (the editor's P-SAVE PRESET file)."""
     return _native("P.")

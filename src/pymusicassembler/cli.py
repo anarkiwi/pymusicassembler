@@ -45,7 +45,7 @@ def _wav(args) -> None:
 
 def _resave(args) -> None:
     song = read(args.song)
-    writer.write(song, args.output, container=args.container)
+    writer.write(song, args.output, container=args.container, base=args.base)
     print(f"wrote {args.output}")
 
 
@@ -69,6 +69,11 @@ def _parser() -> argparse.ArgumentParser:
     resave.add_argument("output", help="output file")
     resave.add_argument(
         "--container", choices=("auto", "psid", "prg", "native"), default="auto"
+    )
+    resave.add_argument(
+        "--base",
+        type=lambda text: int(text.replace("$", "0x"), 0),
+        help="native song base address, e.g. $C000 (default: the source's)",
     )
     resave.set_defaults(func=_resave)
     return parser

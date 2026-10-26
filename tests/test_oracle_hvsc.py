@@ -23,6 +23,8 @@ supports, each confirmed byte-exact against the deterministic sidtrace oracle:
   fixed-layout signature): chotaire / cleve (``$1000``).
 * Orderlist transrep seeded into a separate work cell, not the transpose-read
   cell (which can alias the freq-hi table): anakonda / speed_warez.
+* HVSC rips of release-disk editor ``S.`` files (``tests/test_editor_files.py``
+  renders each editor file against its rip): parallax, untouched.
 * Sustain program table in a C64 ROM bank, which the PSID driver's iomap
   banks the ROM-less set (0xEA kernal, zero basic) over: greece_ha,
   shifting_gear (``$5000``).
@@ -68,6 +70,9 @@ TUNES = {
     # Program table reading the C64 ROM banks (the driver's ROM-less iomap).
     "greece_ha": "MUSICIANS/D/Dr_Rox/Greece_Ha.sid",
     "shifting_gear": "MUSICIANS/M/MC/Shifting_Gear.sid",
+    # Rips of the editor S. files tests/test_editor_files.py renders against.
+    "parallax": "MUSICIANS/M/MC/Parallax.sid",
+    "untouched": "MUSICIANS/M/MC/Untouched.sid",
 }
 
 

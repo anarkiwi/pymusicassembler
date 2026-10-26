@@ -52,6 +52,23 @@ class Orderlist:
     entries: List[OrderEntry] = field(default_factory=list)
     terminator: int = constants.ORDER_END
 
+    def to_bytes(self) -> bytes:
+        """The on-disk bytes: the entries, ending in exactly the terminator.
+
+        A ``$FE`` silence is the last entry's single pattern-id byte and a
+        ``$FD n`` jump its two bytes; only an ``$FF`` ending appends a byte.
+        """
+        out = []
+        last = len(self.entries) - 1
+        for i, entry in enumerate(self.entries):
+            if i == last and self.terminator == constants.SILENCE_PATTERN:
+                out.append(entry.pattern_id & 0xFF)
+            else:
+                out.extend((entry.pattern_id & 0xFF, entry.control_byte()))
+        if self.terminator == constants.ORDER_END:
+            out.append(constants.ORDER_END)
+        return bytes(out)
+
 
 @dataclass(frozen=True)
 class NoteEvent:
