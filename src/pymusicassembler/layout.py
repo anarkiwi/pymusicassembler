@@ -29,6 +29,8 @@ STA_ABS_X = 0x9D
 CMP_ABS_X = 0xDD
 _RETURNS = (0x00, 0x40, 0x60, 0x6C)  # BRK, RTI, RTS, JMP (ind)
 IRQ_VECTORS = (0x0314, 0xFFFE)
+SID_BAND = (0xD400, 0xD800)
+SID_STRIDE = 0x20
 
 PLAY_ENTRY = CodePattern("A2 00 CE {tempo:w} 30 {bmi}")
 
@@ -61,7 +63,7 @@ _ROUTINES = (
         "to_filter",
         "8E {filter_owner:w} C8 B1 ?? 8D {fc_acc_reset:w} 29 0F 0A 38 E9 10"
         " 8D {fc_step:w} C8 B1 ?? D0 07 A9 F0 ?? 17 ?? ?? 09 8D {fc_ctr_reset:w}"
-        " BD {res_presets:w} 8D 17 {res_sid} A9 FF 9D {ctrl_mask:w} 9D {vib_toggle:w}"
+        " BD {res_presets:w} 8D {res_sta:w} A9 FF 9D {ctrl_mask:w} 9D {vib_toggle:w}"
         " A9 00 9D {arp_substep:w} 9D {arp_phase:w}",
     ),
     (
@@ -237,7 +239,7 @@ class Layout:
     inner_hi: int
     pitch_skip: int
     sid: int
-    res_sid: int
+    res_sta: int
     fc_sid: int
     order_tempo: Tuple[int, ...] = ()
     order_jump: int = 0
@@ -415,8 +417,11 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     if found["arp_down_op"] not in (STA_ABS_X, CMP_ABS_X):
         raise MusicAssemblerParseError("player signatures not found (arp descent)")
     found["arp_down_cmp"] = found["arp_down_op"] == CMP_ABS_X
-    for page in ("sid", "res_sid", "fc_sid"):
+    for page in ("sid", "fc_sid"):
         found[page] <<= 8
+    if SID_BAND[0] <= found["res_sta"] < SID_BAND[1]:
+        # a store to a SID mirror lands on the register it aliases on that page
+        found["res_sta"] &= 0xFF00 | (SID_STRIDE - 1)
     if found["pitch_skip"] not in (0, 4):
         raise MusicAssemblerParseError("player signatures not found (pitch_skip)")
     inits = find_code_all(image, _INIT, start=start, end=end)

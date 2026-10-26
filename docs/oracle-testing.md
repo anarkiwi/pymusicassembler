@@ -69,6 +69,9 @@ Helpers for working through a survey:
   later run's verdicts per class.
 - `scripts/layout_census.py HVSC tunes.csv` tallies which player builds
   `pymusicassembler.layout` finds, statically and after init.
+- `scripts/layout_mismatch.py TUNE.sid [SONG ...]` names the routine where a
+  `not_decompiled` subtune's player (after init) leaves the layout's routine
+  chain, and each literal byte there that differs (`+offset:expected>actual`).
 - the shared `pysidtracker disasm TUNE.sid [START [END]]` command
   (`pysidtracker.disasm`, pysidtracker >= 0.15) disassembles a tune image, the
   tune's init/play entries labelled and `--after-init` the image state after

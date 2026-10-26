@@ -42,7 +42,7 @@ SPACE = {
     "sweep_sta": 0x129E,
     "program_acc": 0x129E,
     "sid": 0xD400,
-    "res_sid": 0xD400,
+    "res_sta": 0xD417,
     "fc_sid": 0xD400,
     "res_presets": 0x12B3,
     "voice_reg": 0x10C6,
@@ -220,10 +220,22 @@ def test_filter_stores_keep_their_own_sid_page(tune_path):
         at = image.find_code(CodePattern(pattern), start=lay.entry)
         image.poke(at.addr + 2, 0x1C)
     moved = layout.discover(image, lay.entry)
-    assert (moved.sid, moved.res_sid, moved.fc_sid) == (0x1C00, lay.sid, lay.sid)
+    assert (moved.sid, moved.res_sta, moved.fc_sid) == (0x1C00, 0xD417, lay.sid)
     at = image.find_code(CodePattern("8D 16 {page}"), start=lay.entry)
     image.poke(at.addr + 2, 0xD5)
     assert layout.discover(image, lay.entry).fc_sid == 0xD500
+
+
+@pytest.mark.parametrize(
+    "lo, res_sta", [(0x17, 0xD417), (0x30, 0xD410), (0x5E, 0xD41E)]
+)
+def test_resonance_store_lands_on_the_register_it_aliases(tune_path, lo, res_sta):
+    """A build storing the resonance to a SID mirror writes the register it aliases."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    entry = Player(reader.parse(tune_path.read_bytes())).layout.entry
+    at = image.find_code(CodePattern("8D 17 D4 A9 FF"), start=entry)
+    image.poke(at.addr + 1, lo)
+    assert layout.discover(image, entry).res_sta == res_sta
 
 
 def test_arp_operands_name_the_standard_cells(tune_path):

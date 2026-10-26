@@ -3,6 +3,7 @@
 import csv
 import json
 
+import layout_mismatch
 import native_roundtrip
 import survey_sample
 from pysidtracker import survey
@@ -84,3 +85,19 @@ def test_native_roundtrip_labels_failures(tmp_path, jump_tune_path):
     junk.write_bytes(b"\x00\x10" + bytes(64))
     assert native_roundtrip.roundtrip(junk) == ("unread", "MusicAssemblerParseError")
     assert native_roundtrip.roundtrip(jump_tune_path)[1] == "rejected"
+
+
+def test_layout_mismatch_names_the_differing_bytes(tmp_path, tune_path, capsys):
+    data = tune_path.read_bytes()
+    layout_mismatch.main([str(tune_path)])
+    assert "matches" in capsys.readouterr().out
+    patched = tmp_path / "patched.sid"
+    patched.write_bytes(
+        data.replace(bytes.fromhex("8D17D4A9FF"), bytes.fromhex("8C17D4A9FF"))
+    )
+    layout_mismatch.main([str(patched), "1"])
+    out = capsys.readouterr().out
+    assert "to_filter at" in out and ":8d>8c" in out
+    patched.write_bytes(data.replace(bytes.fromhex("A200CE"), bytes.fromhex("A201CE")))
+    layout_mismatch.main([str(patched)])
+    assert "no play entry" in capsys.readouterr().out

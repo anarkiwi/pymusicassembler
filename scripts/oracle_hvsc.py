@@ -18,7 +18,7 @@ PLAYER = r"^\(?music_assembler(/mc)?\)?$"
 
 def render(data, song, nframes):
     """Render 1-based ``song`` of a Music Assembler ``.sid`` and the build it decoded."""
-    tune = parse(data)
+    tune = parse(data, song - 1)
     player = Player(tune, subtune=song - 1)
     info = {
         "load_offset": tune.load_addr - player.base,
