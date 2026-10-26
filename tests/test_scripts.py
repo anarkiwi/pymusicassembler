@@ -3,6 +3,7 @@
 import csv
 import json
 
+import native_roundtrip
 import survey_sample
 from pysidtracker import survey
 
@@ -68,3 +69,18 @@ def test_sample_classes_copies_traces_and_tallies(tmp_path, capsys):
         ["compare", str(tmp_path / "after.csv"), str(dst / "classes" / "tempo.txt")]
     )
     assert "tempo.txt: 1 {'exact': 1}" in capsys.readouterr().out
+
+
+def test_native_roundtrip_reports_editor_files(editor_file, capsys):
+    path = str(editor_file("s.parallax"))
+    native_roundtrip.main([path])
+    assert "build=identical native=identical: 1" in capsys.readouterr().out
+    native_roundtrip.main([path, "--base", "$2000"])
+    assert "native=same_music: 1" in capsys.readouterr().out
+
+
+def test_native_roundtrip_labels_failures(tmp_path, jump_tune_path):
+    junk = tmp_path / "junk.prg"
+    junk.write_bytes(b"\x00\x10" + bytes(64))
+    assert native_roundtrip.roundtrip(junk) == ("unread", "MusicAssemblerParseError")
+    assert native_roundtrip.roundtrip(jump_tune_path)[1] == "rejected"

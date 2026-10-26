@@ -6,9 +6,9 @@ import pytest
 
 from pysidtracker import SidImage, write_psid
 
-from pymusicassembler import constants, reader
+from pymusicassembler import constants, reader, writer
 from pymusicassembler.errors import SidParseError
-from pymusicassembler.model import Arpeggio, ArpeggioRow
+from pymusicassembler.model import Arpeggio, ArpeggioRow, Instrument, Pattern
 from pymusicassembler.reader import parse, read
 
 
@@ -45,6 +45,40 @@ def test_patterns_and_instruments(tune_path):
     song = read(tune_path)
     assert song.patterns  # at least one referenced pattern
     assert song.instruments  # at least one referenced instrument
+
+
+@pytest.mark.parametrize(
+    "data,expected",
+    [
+        ([0x24, 0x9F, 0x97, 0x2E], []),  # $9F note control (filter) and its args
+        ([0x87, 0x24, 0x9F, 0x97, 0x2E, 0x24, 0x9F, 0x39, 0x2C], [7]),
+        ([0x24, 0x20, 0x85, 0x9E], []),  # vibrato args in the select range
+        ([0x83, 0x61, 0x9E, 0x24, 0x01], [3, 30]),  # select + duration, then a select
+    ],
+)
+def test_instrument_ids_come_from_the_grammar(data, expected):
+    """Only $80-$9F bytes at an event position select an instrument (#25)."""
+    assert reader._referenced_instrument_ids([Pattern(data)]) == expected
+
+
+def test_control_bytes_add_no_instruments(tune_path):
+    """A filter command's $9F control byte does not grow the instrument table."""
+    song = read(tune_path)
+    count = len(song.instruments)
+    song.patterns[0] = Pattern(song.patterns[0].data + [0x24, 0x9F, 0x97, 0x2E])
+    prefix = bytes((song.load_addr & 0xFF, song.load_addr >> 8))
+    assert len(parse(prefix + writer.build(song)).instruments) == count
+
+
+@pytest.mark.parametrize("tune_id", ["space"], indirect=True)  # presets placed last
+def test_partial_last_preset_record_round_trips(tune_path):
+    """A source ending part-way into its last preset record re-emits as is."""
+    song = read(tune_path)
+    image = song.image[:-3]
+    short = parse(bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + image)
+    assert len(short.instruments) == len(song.instruments)
+    assert short.instruments[-1] == Instrument.from_bytes(song.image[-8:-3])
+    assert writer.build(short) == image
 
 
 def test_load_address_is_standard(tune_path):
@@ -143,7 +177,7 @@ def test_rejects_unterminated_orderlist():
     view = reader.load_view(bytes((0x00, 0x10, 0x00, 0x10)) + bytes(0x1100), 0x1000)
     bases = {"order_lo": 0x1000, "order_hi": 0x1002}
     with pytest.raises(SidParseError, match="no terminator"):
-        reader._parse_orderlist(view, bases, 0)  # pylint: disable=protected-access
+        reader.parse_orderlist(view, bases, 0)  # pylint: disable=protected-access
 
 
 def relocating_rip(song, at=0xC000):
@@ -210,7 +244,7 @@ def test_pattern_keeps_inline_ff_args(tune_path):
 def test_orderlist_ends_where_the_player_stops_reading(data, jump, count, terminator):
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(data), 0x1000)
     bases = {"order_lo": 0x1000, "order_hi": 0x1001}
-    orderlist = reader._parse_orderlist(  # pylint: disable=protected-access
+    orderlist = reader.parse_orderlist(  # pylint: disable=protected-access
         view, bases, 0, jump
     )
     assert len(orderlist.entries) == count
@@ -223,7 +257,7 @@ def test_silence_entry_reads_no_control_byte():
         bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFE, 0x87)), 0x1000
     )
     bases = {"order_lo": 0x1000, "order_hi": 0x1001}
-    orderlist = reader._parse_orderlist(
+    orderlist = reader.parse_orderlist(
         view, bases, 0
     )  # pylint: disable=protected-access
     assert orderlist.terminator == constants.SILENCE_PATTERN
@@ -237,7 +271,7 @@ def test_jump_entry_carries_its_target():
         bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFD, 0x04)), 0x1000
     )
     bases = {"order_lo": 0x1000, "order_hi": 0x1001}
-    orderlist = reader._parse_orderlist(  # pylint: disable=protected-access
+    orderlist = reader.parse_orderlist(  # pylint: disable=protected-access
         view, bases, 0, constants.ORDER_JUMP
     )
     assert orderlist.terminator == constants.ORDER_JUMP
@@ -272,14 +306,14 @@ def test_jump_entry_carries_its_target():
 def test_parse_program_rows_and_terminator(payload, expected):
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(payload), 0x1000)
     assert (
-        reader._parse_program(view, 0x1004, 0x1010) == expected
+        reader.parse_program(view, 0x1004, 0x1010) == expected
     )  # pylint: disable=protected-access
 
 
 def test_parse_program_rejects_unterminated():
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(0x100), 0x1000)
     with pytest.raises(SidParseError, match="no terminator"):
-        reader._parse_program(view, 0x1004, 0x1010)  # pylint: disable=protected-access
+        reader.parse_program(view, 0x1004, 0x1010)  # pylint: disable=protected-access
 
 
 def test_inner_programs_are_modeled(tune_path):

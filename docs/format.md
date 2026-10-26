@@ -34,20 +34,22 @@ tables lie outside the loaded image is read after its init runs in the emulator.
 | Later | init before the play entry, `LDX #n` per voice | orderlist `$FC t`: tempo `t`; `$FD n`; wave-program `$FD r`: jump to row `r` |
 
 `write(song, dst, container="auto"|"psid"|"prg"|"native")` writes a tune image;
-`auto` re-emits the original container. `read(write(song)) == song`, and
-`build(read(image)) == image` when the source's preset table holds every record
-the reader references: the reader takes every `$80-$9F` pattern byte as a
-preset reference — note control bytes and inline filter/vibrato arguments
-included — and re-emits each referenced record (zero-filled past the source's
-end), so a source whose preset table stops earlier than that reference set
-re-emits longer (#25). Each orderlist re-emits exactly its on-disk terminator
-— no `$FF` is appended after a `$FE` silence or a `$FD n` jump (#24). Arpeggio
-programs re-emit at their slot pointers without moving — the file's reserved
-region (through the original pack's end) bounds any growth, and programs the
-song adds beyond the file's are appended past the data end with their slot
-pointer updated. The writer discovers the table bases from the same
-relocation-invariant player-code signatures the reader uses, so any load
-address re-emits, not just the standard `$1021` layout.
+`auto` re-emits the original container. `read(write(song)) == song` and
+`build(read(image)) == image`. The reader takes the instruments the patterns
+select from the decoded grammar (a `$80-$9F` note control byte or inline
+filter/vibrato argument is not a select); a preset table placed last holds
+every record up to the image end or the next stored data (the editor saves it
+that far, so its last record may be partial), and an editor pattern table
+(`pattern_lo` = `pattern_hi` + stored patterns + 1, closed by a zero entry, all
+inside the file) adds the patterns no orderlist references. `build` does not
+re-emit the zeros the reader fills past the source's end. Each orderlist
+re-emits exactly its on-disk terminator — no `$FF` is appended after a `$FE`
+silence or a `$FD n` jump. Arpeggio programs re-emit at their slot pointers
+without moving — the file's reserved region (through the original pack's end)
+bounds any growth, and programs the song adds beyond the file's are appended
+past the data end with their slot pointer updated. The writer discovers the
+table bases from the same relocation-invariant player-code signatures the reader
+uses, so any load address re-emits, not just the standard `$1021` layout.
 
 ## Native editor formats
 
@@ -66,12 +68,9 @@ address):
 | `S.` song | chosen at save — the editor relocates the song anywhere in `$0400-$FF00` | the player + data, self-starting |
 | `P.` preset bank | `$4300`, 768 bytes | 16 arpeggio slots of 32 bytes (`wave, note, filter` rows; `$FE` stop / `$FF` restart; empty slot = all zeroes) + 32 presets × 8 bytes (the `Instrument` record layout) |
 
-`S.` songs read into a `Song` and write back via `container="native"`,
-byte-identically where the round-trip conditions above hold. `container="native"`
-keeps the source's table order and emits at the tune's own base — it does not
-yet do the editor's save-time relocation or table reflow, so an export of a
-table order the editor cannot load plays but is not an editor song, and builds
-the editor cannot represent raise `SongValidationError` (#28). `P.` banks are
+`S.` songs read into a `Song` and write back via `container="native"`, which
+assembles the editor's layout at any base in `$0400-$FF00` (below).
+`P.` banks are
 not tunes: `read()` rejects them, and `read_presets()` / `write_presets()`
 (#27) handle them as `PresetBank`.
 
@@ -89,15 +88,47 @@ base+$48  <init routine>
 ...       <order / pattern / instrument / note-freq / wave-program tables>
 ```
 
-HVSC rips of these songs just swap the first six bytes for PSID `JMP init` /
-`JMP play` vectors (or begin the image at the play routine). `container="native"`
-reverses that: it re-emits the data, finds the player base from the play-entry
-signature (`base = tempo_cell - $90`, where the tempo prescaler is `base+$90`),
-and writes the self-start stub back at `base` — at the tune's **own** load
-address, with no relocation. When the preset table holds the reader's full
-reference set the re-emission is byte-for-byte; where the reference set
-outruns the stored table, the missing records are zero-filled in and the
-re-emission is longer (#25).
+HVSC rips of these songs swap the first six bytes for PSID `JMP init` /
+`JMP play` vectors (or begin the image at the play routine).
+`build_native(song, base=None)` (`write(..., container="native", base=...)`,
+`pymusicassembler resave --container native --base $C000`) assembles the editor's
+save from the model, relocated to `base` (default: the source's player base,
+`tempo_cell - $90`):
+
+| part | contents |
+| --- | --- |
+| player | the stub for `base`; the source's player through the orderlist pointer table (code, note-frequency tables, arpeggio and orderlist pointers, the work-RAM snapshot), plus player code placed after that table (an order-hook routine) |
+| data | patterns, orderlists (voice 3 first), arpeggio programs, `pattern_hi`, `pattern_lo` (each with a closing zero entry), presets |
+
+- Player operands are relocated by walking the player's control flow from its
+  play and init entries (`JSR`/`JMP`/branch targets; `CLC; BCC`-style forced
+  branches; `RTS`/`RTI`/`BRK`/`JMP ()`/`JAM` end a path); operands into the
+  player move with `base`, operands at `pattern_lo`, `pattern_hi` and the
+  presets follow their tables, and an operand into other song data raises
+  `SongValidationError`.
+- The editor saves its data area verbatim, unused bytes included: while items
+  keep their source order, the source's bytes between them are kept, and a
+  pattern overlapping the previous one (a shared tail) stays inside it. The
+  preset table keeps the source's extent (a partial last record stays partial).
+- Like the editor's relocation loop, `inner_hi` entries 1-16 (one past the
+  table) move by the page delta; empty arpeggio slots keep their placeholder
+  pointers, and a slot the song emptied points to `$0000`.
+- `SongValidationError` for a player not at the editor's layout (no play entry
+  at `base+$21`, tables out of the editor's order), orderlist `$FC`/`$FD` or
+  program `$FD` commands, an arpeggio program longer than the editor's 32-byte
+  program slot (the editor overwrites the next program with its tail), or a
+  base reaching `$D000-$DFFF`.
+- A program pitch is masked to 7 bits, so pitches 96-127 read past the 96-entry
+  frequency tables into the arpeggio pointer table and player code. Moving the
+  programs (reflowing a source not in the editor's order) or relocating
+  changes those bytes, as the editor's own load and save does.
+
+Editor files re-emit byte-identically (the release disks' `S.` files and the
+editors' re-saves, relocated or not); the stub is the editor's, so a file with
+a hand-edited stub differs there. Assembling at another base reproduces the
+editor's relocated save but for the work-RAM snapshot. `tests/test_editor_files.py`
+checks this on release-disk `S.` files pinned in `tests/fixtures/ma_native.txt`,
+each against its HVSC rip.
 
 ### `P.` preset bank (`read_presets` / `write_presets`)
 

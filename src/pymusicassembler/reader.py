@@ -4,7 +4,7 @@ Table bases come from the player code's own operands (see
 :mod:`pymusicassembler.layout`); an unrecognized player raises a parse error.
 """
 
-from typing import List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple
 
 from pysidtracker import (
     PSID_MAGIC,
@@ -23,6 +23,7 @@ from pymusicassembler.model import (
     Arpeggio,
     ArpeggioRow,
     Instrument,
+    InstrumentEvent,
     OrderEntry,
     Orderlist,
     Pattern,
@@ -61,7 +62,7 @@ def _parse_container(
     return load, init, play, name, author, released, img.image, img.container
 
 
-_TABLES = (
+TABLES = (
     "order_lo",
     "order_hi",
     "pattern_lo",
@@ -84,7 +85,7 @@ def discover_layout(image: SidImage, play: int, start: int, end: int) -> layout.
     if entry is None:
         raise MusicAssemblerParseError("no play entry found; unsupported variant")
     lay = layout.discover(image, entry, start, end)
-    for name in _TABLES:
+    for name in TABLES:
         base = getattr(lay, name)
         if not start <= base < end:
             raise MusicAssemblerParseError(
@@ -97,7 +98,7 @@ def discover_layout(image: SidImage, play: int, start: int, end: int) -> layout.
 def discover_bases(image: SidImage, load: int, image_len: int, play=None) -> dict:
     """Per-tune table base addresses of the player in ``[load, load + image_len)``."""
     lay = discover_layout(image, load if play is None else play, load, load + image_len)
-    return {name: getattr(lay, name) for name in _TABLES}
+    return {name: getattr(lay, name) for name in TABLES}
 
 
 def load_view(image: bytes, load: int) -> SidImage:
@@ -136,7 +137,7 @@ def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int
     return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
 
 
-def _parse_orderlist(
+def parse_orderlist(
     img: SidImage, bases: dict, voice: int, jump: Optional[int] = None
 ) -> Orderlist:
     """Voice ``voice``'s orderlist, up to and including its on-disk terminator.
@@ -170,7 +171,7 @@ def _parse_orderlist(
     return Orderlist(entries=entries, terminator=terminator)
 
 
-def _parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
+def parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
     """Extract a pattern's raw bytes, walking the grammar so an inline
     filter/vibrato argument byte that happens to be ``$FF`` is not mistaken
     for the pattern terminator (the terminator is only an ``$FF`` read at a
@@ -215,7 +216,7 @@ def _parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
     return Pattern(data=data)
 
 
-def _parse_program(img: SidImage, addr: int, limit: int) -> Arpeggio:
+def parse_program(img: SidImage, addr: int, limit: int) -> Arpeggio:
     """One arpeggio program at ``addr``: its rows, then the terminating marker.
 
     Walks like the player: a row is three bytes (wave, note, filter); a
@@ -264,7 +265,7 @@ def _parse_inner_programs(
         ptr = img.ptr(lay.inner_lo, lay.inner_hi, i)
         if base <= ptr < limit:
             try:
-                programs.append(_parse_program(img, ptr, limit))
+                programs.append(parse_program(img, ptr, limit))
                 continue
             except MusicAssemblerParseError:
                 pass
@@ -283,12 +284,48 @@ def _referenced_pattern_ids(orderlists: List[Orderlist], commands=()) -> List[in
 
 
 def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
-    ids = set()
-    for pattern in patterns:
-        for byte in pattern.data:
-            if constants.INSTR_MIN <= byte <= constants.INSTR_MAX:
-                ids.add(byte & 0x1F)
-    return sorted(ids)
+    """Instrument ids the patterns select, from the decoded grammar.
+
+    A ``$80-$9F`` byte is a select only at an event position: note control
+    bytes and inline filter/vibrato arguments in that range are not.
+    """
+    return sorted(
+        {
+            event.instrument
+            for pattern in patterns
+            for event in pattern.events()
+            if isinstance(event, InstrumentEvent)
+        }
+    )
+
+
+def _stored_patterns(img: SidImage, lay: "layout.Layout", end: int) -> int:
+    """Patterns the editor's pointer table stores, else 0.
+
+    The editor saves ``pattern_hi`` then ``pattern_lo``, each holding one
+    pointer per stored pattern (referenced or not) and a closing zero entry,
+    all inside the file (a rip may cut the table short).
+    """
+    count = lay.pattern_lo - lay.pattern_hi - 1
+    if not 0 < count < end - lay.pattern_lo:
+        return 0
+    if img.ptr(lay.pattern_lo, lay.pattern_hi, count):
+        return 0
+    ptrs = (img.ptr(lay.pattern_lo, lay.pattern_hi, i) for i in range(count))
+    return count if all(lay.order_hi < ptr < end for ptr in ptrs) else 0
+
+
+def _stored_instruments(lay: "layout.Layout", end: int, data: Iterable[int]) -> int:
+    """Preset records an instrument table placed last holds, up to the next ``data``.
+
+    The editor saves its presets up to the image end, so the final record may
+    be partial; data stored past them (an appended program) bounds the table.
+    """
+    if lay.instr < max(getattr(lay, name) for name in TABLES) or lay.instr >= end:
+        return 0
+    end = min([end] + [addr for addr in data if addr > lay.instr])
+    size = constants.INSTR_RECORD_SIZE
+    return min(-(-(end - lay.instr) // size), constants.INSTR_COUNT)
 
 
 def _locate(image: bytes, load: int, init: Optional[int], play: int):
@@ -324,23 +361,37 @@ def parse(data: bytes) -> Song:
     img, lay, post_init = _locate(image, load, init if sid else None, play)
     if not sid:
         init, play = lay.init, lay.entry
-    bases = {name: getattr(lay, name) for name in _TABLES}
+    bases = {name: getattr(lay, name) for name in TABLES}
     commands = {constants.ORDER_TEMPO} if lay.order_tempo else set()
     commands |= {constants.ORDER_JUMP} if lay.order_jump else set()
 
     orderlists = [
-        _parse_orderlist(
+        parse_orderlist(
             img, bases, voice, constants.ORDER_JUMP if lay.order_jump else None
         )
         for voice in range(constants.VOICES)
     ]
 
+    end = load + len(image) if img.load == load else 0  # 0: no file extent
     pattern_ids = _referenced_pattern_ids(orderlists, commands)
-    max_pid = max(pattern_ids) if pattern_ids else -1
-    patterns = [_parse_pattern(img, bases, pid) for pid in range(max_pid + 1)]
+    stored = _stored_patterns(img, lay, end)
+    npat = max([pid + 1 for pid in pattern_ids] + [stored])
+    patterns = [parse_pattern(img, bases, pid) for pid in range(npat)]
 
+    home = min(load, lay.entry - constants.NATIVE_PLAY_OFFSET)
+    inner_programs = _parse_inner_programs(img, lay, home, max(home, load) + len(image))
+    data = [
+        img.ptr(lay.inner_lo, lay.inner_hi, i)
+        for i, p in enumerate(inner_programs)
+        if p
+    ]
+    data += [img.ptr(lay.pattern_lo, lay.pattern_hi, pid) for pid in range(npat)]
+    data += [
+        img.ptr(lay.order_lo, lay.order_hi, voice) for voice in range(constants.VOICES)
+    ]
     instr_ids = _referenced_instrument_ids(patterns)
-    max_iid = max(instr_ids) if instr_ids else -1
+    stored = _stored_instruments(lay, end, data)
+    ninstr = max([iid + 1 for iid in instr_ids] + [stored])
     instruments = [
         Instrument.from_bytes(
             bytes(
@@ -348,13 +399,11 @@ def parse(data: bytes) -> Song:
                 for k in range(constants.INSTR_RECORD_SIZE)
             )
         )
-        for iid in range(max_iid + 1)
+        for iid in range(ninstr)
     ]
 
     freq_lo = [img.peek(bases["freq_lo"] + n) for n in range(constants.FREQ_TABLE_LEN)]
     freq_hi = [img.peek(bases["freq_hi"] + n) for n in range(constants.FREQ_TABLE_LEN)]
-    home = min(load, lay.entry - constants.NATIVE_PLAY_OFFSET)
-    inner_programs = _parse_inner_programs(img, lay, home, max(home, load) + len(image))
 
     return Song(
         load_addr=load,

@@ -26,8 +26,9 @@ ma.write(song, "tune-edited.sid")
 
 # Export as a native Music Assembler editor song (self-starting ".prg", the
 # same layout in every editor version, V1.0-V1.4 and the Plus/TKC/Faces
-# releases) at the tune's own base.
+# releases), at the tune's own base or relocated like the editor's save.
 ma.write(song, "S.TUNE.prg", container="native")
+ma.write(song, "S.TUNE.prg", container="native", base=0xC000)
 
 # The editor's P. preset bank: read, write, or apply it to a song.
 bank = ma.read_presets("P.TUNE.p")
@@ -44,6 +45,7 @@ pymusicassembler reglog tune.sid tune.reglog --seconds 30
 pymusicassembler wav    tune.sid tune.wav    --seconds 30 --model 8580
 pymusicassembler resave tune.sid out.sid     # round-trip write-back (see docs/format.md)
 pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
+pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  # relocated
 ```
 
 ## Public API
@@ -52,15 +54,17 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 - `read_presets(src) -> PresetBank` / `parse_presets(bytes)` — read the
   editor's `P.` preset bank (the 768-byte `$4300` body, with or without its
   load prefix).
-- `write(song, dst, container="auto"|"psid"|"prg"|"native")` — write a tune
-  image; `auto` re-emits the original container; `native` emits the Music
-  Assembler editor `S.` song (self-starting `.prg`).
+- `write(song, dst, container="auto"|"psid"|"prg"|"native", base=None)` — write
+  a tune image; `auto` re-emits the original container; `native` emits the Music
+  Assembler editor `S.` song (self-starting `.prg`) at `base` (default the
+  source's player base).
 - `write_presets(bank, dst)` — write the editor's `P.` file (load `$4300` +
   the 768-byte body); `build_presets(bank) -> bytes` — the body;
   `Song.apply_preset_bank(bank)` — make a song reference the bank's presets
   and arpeggios (the editor's "play back with different preset banks").
-- `build(song) -> bytes` — the raw C64 image; `build_native(song) -> bytes` —
-  the native self-starting image body; `validate(song)`.
+- `build(song) -> bytes` — the raw C64 image; `build_native(song, base=None) ->
+  bytes` — the native self-starting image body in the editor's layout (see
+  [format.md](format.md#s-songs-containernative)); `validate(song)`.
 - `Player(song)` — `.play_frame() -> list[(reg, val)]`, `.regs`. A `.sid`
   with play address 0 plays every interrupt its init installs (raster, CIA
   IRQs, NMI digis, a main loop) on `pysidtracker.irqhost.InterruptPlayer`,
