@@ -4,7 +4,7 @@ import io
 
 import pytest
 
-from pysidtracker import write_psid
+from pysidtracker import SidImage, write_psid
 
 from pymusicassembler import constants, reader
 from pymusicassembler.errors import SidParseError
@@ -169,6 +169,13 @@ def test_relocating_rip_is_read_after_init(tune_path):
     assert copy.patterns == song.patterns
     assert copy.instruments == song.instruments
     assert copy.inner_programs == song.inner_programs
+
+
+def test_relocating_rip_is_recognised(tune_path):
+    song = read(tune_path)
+    parser = reader.MusicAssemblerSidParser()
+    image = SidImage.from_bytes(relocating_rip(song))
+    assert parser.recognize(image) is not None
 
 
 def test_relocating_prg_without_init_is_rejected(tune_path):
