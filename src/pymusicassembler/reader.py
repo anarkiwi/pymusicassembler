@@ -421,11 +421,24 @@ class MusicAssemblerSidParser(BaseSidParser):
         return parse(data)
 
     def recognize(self, image: SidImage) -> object:
-        """The play-entry address if a whole MA player is in the loaded region."""
-        play = image.header.play_address if image.header else 0
+        """The play-entry address if a whole MA player is in the loaded region.
+
+        A PSID/RSID whose init relocates the player is located in memory after
+        init, as :func:`parse` does.
+        """
+        header = image.header
+        play = header.play_address if header else 0
         try:
             return discover_layout(
                 image, play or image.load, image.load, image.end
             ).entry
         except MusicAssemblerParseError:
+            pass
+        init = header.init_address if header else 0
+        if not init:
+            return None
+        try:
+            return _locate(image.image, image.load, init, play or image.load)[1].entry
+        except Exception:  # pylint: disable=broad-except
+            # init may fail or not terminate; an unlocatable player is unrecognised
             return None
