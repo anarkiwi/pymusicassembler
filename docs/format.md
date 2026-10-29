@@ -175,21 +175,33 @@ the build's commands from the discovered layout:
 | orderlist | `order_lo`/`order_hi` | `orderlist`; `orderlist_hook` (`$FD n`); `orderlist_inline` (`$FC t`, `$FD n`) |
 | arpeggio program | `inner_lo`/`inner_hi` | `program`; `program_jump` (`$FD r`) |
 
-- **Pattern** — `row* $FF`. A row is a `note` (`< $60` pitch, then a control
-  byte: low five bits duration, bit 6 tie, bit 5 vibrato with two step bytes,
-  bit 7 filter with cutoff and sweep bytes), a `rest` (`$60-$7F`, gate off), a
-  `hold` (`$A0-$FE`, the note sounds on) or a `select` (`$80-$9F`, instrument
-  `id & $1F`) followed by a note or by a rest byte `$60-$FF`. Only a row-start
-  `$FF` ends the pattern. The player reads a row before testing for `$FF`, so
-  it plays an empty pattern's lone `$FF` as a hold.
+- **Pattern** — `row* $FF`. Every row sets a duration `d` (`byte & $1F`) and
+  lasts `d + 1` tempo ticks. A row is one of these:
+  - a `note`: a `< $60` pitch, then a control byte. Its low five bits are `d`.
+    Bit 6 ties the note (no retrigger). Bit 5 runs the vibrato, with two step
+    bytes, and stops the instrument's flag-`$10` frequency sweep, though a wave
+    program still runs. Bit 7 takes the filter sweep, with a cutoff byte (low
+    nibble `n`: step `2n - 16`) and a length byte (`0` routes no voice);
+  - a `rest` (`$60-$7F`, gate off);
+  - a `hold` (`$A0-$FE`, the note sounds on);
+  - a `select` (`$80-$9F`, instrument `id & $1F` from this row on), followed by
+    a note or by a rest byte `$60-$FF`.
+
+  Only a row-start `$FF` ends the pattern. The player reads a row before
+  testing for `$FF`, so it plays an empty pattern's lone `$FF` as a hold and
+  reads on.
 - **Orderlist** — `(pattern_id, transpose << 4 | repeat)` entries ending in
   `$FF` (loop to the build's restart entry) or a single `$FE` (park on the
   silence pattern). The order-hook build ends a list on `$FD n` (jump to entry
-  `n`); the later build adds `$FC t` (tempo reload) as an entry.
+  `n`). The later build adds `$FC t`, a tempo reload applied before the step
+  reads the next entry; the model keeps it as an `OrderEntry` with pattern id
+  `$FC`.
 - **Arpeggio program** — `(waveform, pitch, cutoff)` rows ending at a row-start
-  `$FF` (restart) or `$FE` (stop). A `$FD r` (continue at row `r`) ends the
-  program only on builds whose player tests for it; elsewhere it is waveform
-  data.
+  `$FF` (restart) or `$FE` (stop). A non-zero cutoff replaces the filter
+  sweep's cutoff accumulator. A `$FD r` ends the program only on builds whose
+  player tests for it; elsewhere it is waveform data. It continues at byte
+  `3r`: `r = 0`, or `r` at least the marker's byte offset, restarts the
+  program, and `r` from the row count on runs into the bytes past it.
 
 `grammar.check(song, layout)`, run by `build` and `build_native`, refuses a
 stream whose bytes the player would read back differently (a row-start `$FF`
@@ -198,7 +210,8 @@ prints every stream's parse tree.
 
 ## Data model
 
-Three independent per-voice tracks, each a [grammar](#song-grammar) stream:
+The song's streams are [grammar](#song-grammar) streams: an orderlist per
+voice, a shared pool of patterns and 16 arpeggio programs.
 
 - **Orderlists** — one per voice. The reader records which ending it met
   (`$FF`, `$FE` or `$FD n`) and `build` re-emits just that terminator: it never
@@ -209,10 +222,10 @@ Three independent per-voice tracks, each a [grammar](#song-grammar) stream:
 - **Instruments** — 8-byte records: attack/decay, sustain/release, waveform,
   pulse-width init + sweep step, arp speed + step, porta/effect flags.
 - **Arpeggios (inner programs)** — 16 slots indexed by the instrument flags
-  low nibble. The editor stores a tune's used programs
-  packed back-to-back after the other tables, points the slot table
-  (`inner_lo`/`inner_hi`) at them, and leaves the unused slots with
-  placeholder pointers (often shared); `Song.inner_programs` holds a program
+  low nibble; nibble 0 runs no program, so slot 0 never plays. The editor
+  stores a tune's used programs packed back-to-back after the other tables,
+  points the slot table (`inner_lo`/`inner_hi`) at them, and leaves the unused
+  slots with placeholder pointers (often shared); `Song.inner_programs` holds a program
   per slot, `None` where the slot is a placeholder.
 - **Per-frame DSP** — tempo divider (rows advance every `n+1` play calls, `n`
   the per-tune `LDA #n` the play entry reloads it with), 16-bit pulse-width sweep, vibrato/arp

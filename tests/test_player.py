@@ -546,3 +546,129 @@ def test_long_duration_stores_where_the_parse_routine_does(tune_path):
     player._wr(lay.dur, 0xFF)
     player._parse(0)
     assert (player._rd(FREE), player._rd(lay.dur)) == (7, 0xFF)
+
+
+def _pattern(player, data, v=0):
+    """Point voice ``v`` at ``data`` as its current pattern, cursor at row 0."""
+    lay = player.layout
+    _poke(player, FREE + 0x40, data)
+    pid = player._rd(lay.pattern_id + v)
+    player._wr(lay.pattern_lo + pid, (FREE + 0x40) & 0xFF)
+    player._wr(lay.pattern_hi + pid, (FREE + 0x40) >> 8)
+    player._wr(lay.pat_cursor + v, 0)
+    return FREE + 0x40
+
+
+@pytest.mark.parametrize(
+    "row", [(0x10, 0x02), (0x62,), (0xA2,), (0x81, 0xA2), (0x10, 0x22, 1, 0)]
+)
+def test_a_row_lasts_its_duration_plus_one_tempo_ticks(tune_path, row):
+    """Every row kind counts ``byte & $1F`` down to below zero before the next row."""
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    _pattern(player, row * 3 + (constants.PATTERN_END,))
+    player._wr(lay.dur, 0xFF)
+    player._parse(0)
+    parsed = []
+    for tick in range(9):
+        if player._inc(lay.dur, -1) >= 0x80:
+            player._parse(0)
+            parsed.append(tick)
+    assert parsed == [2, 5, 8]
+
+
+@pytest.mark.parametrize("byte,gate", [(0x62, 0x40), (0xA2, 0x41), (0xFF, 0x41)])
+def test_rest_gates_off_and_hold_keeps_the_note(tune_path, byte, gate):
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    _pattern(player, (byte, 0x10, 0x02, constants.PATTERN_END))
+    player._wr(lay.ctrl, 0x41)
+    player._wr(lay.freq_lo_w, 0x55)
+    player._parse(0)
+    assert player._rd(lay.ctrl) == gate
+    assert player._rd(lay.freq_lo_w) == 0x55
+    assert player._rd(lay.dur) == byte & constants.CTL_DUR_MASK
+
+
+def test_empty_pattern_plays_its_ff_as_a_hold_and_reads_on(tune_path):
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    _pattern(player, (constants.PATTERN_END, 0x10, 0x02, constants.PATTERN_END))
+    player._parse(0)
+    assert player._rd(lay.dur) == 0x1F
+    assert player._rd(lay.pat_cursor) == 1
+
+
+def test_instrument_select_persists_for_later_notes(tune_path):
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    _pattern(player, (0x82, 0x10, 0x00, 0x11, 0x00, constants.PATTERN_END))
+    player._parse(0)
+    player._wr(lay.dur, 0xFF)
+    player._parse(0)
+    assert player._rd(lay.instr_x8) == 2 << 3
+    assert player._rd(lay.pat_cursor) == 0
+
+
+@pytest.mark.parametrize(
+    "flags,ctl,called",
+    [
+        (0x11, constants.CTL_VIBARP, "program"),
+        (0x11, 0, "program"),
+        (0x10, constants.CTL_VIBARP, None),
+        (0x10, 0, "arp"),
+    ],
+)
+def test_vibrato_bit_suppresses_the_sweep_not_the_program(
+    tune_path, flags, ctl, called
+):
+    """Flags' low nibble runs program 1..15 (0: none); bit 5 only stops the flag-$10 sweep."""
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    seen = []
+    player._program = lambda v, slot: seen.append(("program", slot))
+    player._arp = lambda v, x8: seen.append(("arp", x8))
+    player._wr(lay.flags, flags)
+    player._sustain(0, lay.instr, ctl | constants.CTL_TRIGGERED)
+    assert [name for name, _ in seen] == ([called] if called else [])
+
+
+@pytest.mark.parametrize("cutoff,expect", [(0x55, 0x55), (0x00, 0x33)])
+def test_program_cutoff_sets_the_filter_sweep_accumulator(tune_path, cutoff, expect):
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    _poke(player, FREE, (0x41, 0x00, cutoff, constants.PROGRAM_RESTART))
+    player._wr(lay.inner_lo + 1, FREE & 0xFF)
+    player._wr(lay.inner_hi + 1, FREE >> 8)
+    player._wr(lay.instr_cursor, 0)
+    player._wr(lay.program_acc, 0x33)
+    fc_hi = player.snapshot()[0x16]
+    player._program(0, 1)
+    assert lay.program_acc == lay.sweep_acc
+    assert player._rd(lay.sweep_acc) == expect
+    assert player.snapshot()[0x16] == fc_hi
+
+
+@pytest.mark.parametrize("length,ctr,res", [(0x07, 0x07, None), (0x00, 0x09, 0xF0)])
+def test_filter_note_arms_the_trigger_sweep(tune_path, length, ctr, res):
+    """The cutoff byte and its nibble's step 2n-16 load at the trigger; length 0 unroutes."""
+    player = Player(reader.read(tune_path))
+    lay = player.layout
+    _pattern(player, (0x10, 0x82, 0x4B, length, constants.PATTERN_END), v=1)
+    player._wr(lay.fc_ctr_reset, 0x09)
+    player._parse(1)
+    assert player._rd(lay.trigger_owner) == 1
+    assert player._rd(lay.trigger_acc) == 0x4B
+    assert player._rd(lay.sweep_step) == (2 * 0x0B - 0x10) & 0xFF
+    assert player._rd(lay.trigger_ctr) == ctr
+    expect = player._rd(lay.res_presets + 1) if res is None else res
+    assert player._rd(lay.res_sta) == expect
+
+
+def test_tempo_command_applies_before_the_next_entry_plays(later_tune_path):
+    player = Player(reader.read(later_tune_path))
+    lay = player.layout
+    _orderlist(player, 0, (0x07, 0x00, 0xFC, 0x03, 0x08, 0x10, constants.ORDER_END))
+    assert player._rd(lay.tempo_reload) == 3
+    assert player._rd(lay.pattern_id) == 0x08
+    assert player._rd(lay.order_cursor) == 4
