@@ -11,7 +11,7 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 from pysidtracker import OP_LEN, SidImage
 
 from pymusicassembler import constants, grammar, reader
-from pymusicassembler.errors import SidParseError, SongValidationError
+from pymusicassembler.errors import SongValidationError, unwritable
 from pymusicassembler.layout import JMP_ABS, JSR_ABS, Layout
 from pymusicassembler.model import Song
 
@@ -79,14 +79,11 @@ def _source(song: Song) -> Tuple[SidImage, Layout, int]:
             "player is not at the editor's layout (no play entry at base+$21, as "
             "in later or relocated-copy builds); cannot emit the S. format"
         )
-    try:
+    with unwritable():
         lay = reader.discover_layout(
             view, base + constants.NATIVE_PLAY_OFFSET, load, load + len(song.image)
         )
-    except SidParseError as exc:
-        raise SongValidationError(str(exc)) from exc
-    commands = {constants.ORDER_TEMPO} if lay.order_tempo else set()
-    commands |= {constants.ORDER_JUMP} if lay.order_jump else set()
+    commands = grammar.COMMANDS[grammar.orderlist_rule(lay)]
     if any(
         o.terminator == constants.ORDER_JUMP
         or any(e.pattern_id in commands for e in o.entries)
@@ -181,21 +178,8 @@ def _place(items: List[_Item], view: SidImage, start: int, tmpl_end: int):
     return data, at
 
 
-def _was_program(view: SidImage, lay: Layout, slot: int, region: range) -> bool:
-    """True when the source's ``slot`` pointer reads as a program (else a placeholder)."""
-    addr = view.ptr(lay.inner_lo, lay.inner_hi, slot)
-    rule = grammar.program_rule(lay)
-    try:
-        return addr in region and bool(
-            reader.parse_program(view, addr, region.stop, rule)
-        )
-    except SidParseError:
-        return False
-
-
 def _items(song: Song, view: SidImage, lay: Layout, region: range) -> List[_Item]:
     """The song's patterns, orderlists (voice 3 first) and programs, with source extents."""
-    bases = {name: getattr(lay, name) for name in reader.TABLES}
 
     def source(lo, hi, idx):
         addr = view.ptr(lo, hi, idx)
@@ -208,31 +192,22 @@ def _items(song: Song, view: SidImage, lay: Layout, region: range) -> List[_Item
             continue
         addr = source(lay.pattern_lo, lay.pattern_hi, pid) if pid < ntab else _NO_ADDR
         size = (
-            len(reader.parse_pattern(view, bases, pid).to_bytes())
+            len(reader.parse_pattern(view, lay, pid).to_bytes())
             if addr < _NO_ADDR
             else 0
         )
         items.append(_Item((0, addr, pid), addr, size, pat.to_bytes(), (pid,)))
+    rule = grammar.orderlist_rule(lay)
     for voice, orderlist in enumerate(song.orderlists):
         addr = source(lay.order_lo, lay.order_hi, voice)
-        size = len(
-            reader.parse_orderlist(
-                view, bases, voice, grammar.orderlist_rule(lay)
-            ).to_bytes()
-        )
+        size = len(reader.parse_orderlist(view, lay, voice, rule).to_bytes())
         items.append(_Item((1, -voice, 0), addr, size, orderlist.to_bytes(), (voice,)))
     for i, prog in enumerate(song.inner_programs):
         if prog is None:
             continue
-        addr = source(lay.inner_lo, lay.inner_hi, i)
-        try:
-            size = len(
-                reader.parse_program(
-                    view, addr, region.stop, grammar.program_rule(lay)
-                ).to_bytes()
-            )
-        except SidParseError:
-            addr, size = _NO_ADDR, 0
+        old = reader.stored_program(view, lay, i, region)
+        addr = view.ptr(lay.inner_lo, lay.inner_hi, i) if old else _NO_ADDR
+        size = len(old.to_bytes()) if old else 0
         items.append(_Item((2, addr, i), addr, size, prog.to_bytes(), (i,)))
     return _merge(items)
 
@@ -266,15 +241,18 @@ def assemble(song: Song, base: Optional[int] = None) -> Tuple[int, bytes]:
     def put(addr, values):
         tmpl[addr - src : addr - src + len(values)] = bytes(v & 0xFF for v in values)
 
+    def put_ptrs(lo, hi, index, addrs):
+        put(lo + index, addrs)
+        put(hi + index, [a >> 8 for a in addrs])
+
     put(lay.freq_lo, song.freq_lo)
     put(lay.freq_hi, song.freq_hi)
 
     items = _items(song, view, lay, region)
-    bases = {name: getattr(lay, name) for name in reader.TABLES}
     npat = len(song.patterns) + 1
     ntab = abs(lay.pattern_lo - lay.pattern_hi)
     instr_blob = b"".join(i.to_bytes() for i in song.instruments)
-    if lay.instr in region and lay.instr == max(bases.values()):
+    if lay.instr in region and lay.instr == max(lay.tables().values()):
         kept = max(len(instr_blob.rstrip(b"\0")), region.stop - lay.instr)
         instr_blob = instr_blob[:kept]  # the source's partial last record
     tables = [
@@ -302,12 +280,12 @@ def assemble(song: Song, base: Optional[int] = None) -> Tuple[int, bytes]:
         if addr < lay.order_lo and not 0 <= addr - lay.inner_lo < constants.ARP_COUNT:
             put(addr, (view.peek(addr) + (base >> 8) - (src >> 8),))
     for i in range(constants.ARP_COUNT):
-        if i in program_at or _was_program(view, lay, i, region):
-            ptr = program_at.get(i, 0)  # 0: a slot the song emptied
-            put(lay.inner_lo + i, (ptr,))
-            put(lay.inner_hi + i, (ptr >> 8,))
-    put(lay.order_lo, [order_at[v] for v in range(constants.VOICES)])
-    put(lay.order_hi, [order_at[v] >> 8 for v in range(constants.VOICES)])
+        if i in program_at or reader.stored_program(view, lay, i, region):
+            # 0: a slot the song emptied
+            put_ptrs(lay.inner_lo, lay.inner_hi, i, [program_at.get(i, 0)])
+    put_ptrs(
+        lay.order_lo, lay.order_hi, 0, [order_at[v] for v in range(constants.VOICES)]
+    )
 
     remap = {lay.pattern_lo: pattern_lo, lay.pattern_hi: pattern_hi}
     remap.update((lay.instr + k, instr + k) for k in range(constants.INSTR_RECORD_SIZE))
@@ -325,10 +303,9 @@ def assemble(song: Song, base: Optional[int] = None) -> Tuple[int, bytes]:
         put(operand, struct.pack("<H", target & 0xFFFF))
 
     body = bytes(tmpl + data)
-    if base + len(body) > 0x10000 or reader.image_in_io_area(base, len(body)):
+    if base + len(body) > 0x10000:
         raise SongValidationError(
-            f"native song [{base:#06x},{base + len(body):#06x}) reaches the C64 I/O "
-            f"area {constants.IO_AREA[0]:#06x}-{constants.IO_AREA[1] - 1:#06x} or "
-            "the end of memory; the editor format cannot be emitted there"
+            f"native song [{base:#06x},{base + len(body):#06x}) runs past $FFFF"
         )
+    reader.require_ram(base, len(body), "native song", SongValidationError)
     return base, body

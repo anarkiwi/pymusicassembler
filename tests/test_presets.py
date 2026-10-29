@@ -182,7 +182,7 @@ def test_apply_to_song_reemits_and_renders(preset_bank_path, shape_song_path):
     song.apply_preset_bank(bank)
     assert song.instruments == bank.presets
     assert song.inner_programs == bank.arpeggios
-    prg = bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + writer.build(song)
+    prg = reader.load_prefix(song.load_addr) + writer.build(song)
     re = reader.parse(prg)
     assert re.instruments == song.instruments
     assert re.inner_programs == song.inner_programs

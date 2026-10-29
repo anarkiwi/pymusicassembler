@@ -11,7 +11,7 @@ EDITOR_ORDER = ("space", "7years")  # sources already in the editor's table orde
 
 
 def _reread(base, body):
-    return reader.parse(bytes((base & 0xFF, base >> 8)) + body)
+    return reader.parse(reader.load_prefix(base) + body)
 
 
 def _layout(song):
@@ -125,7 +125,7 @@ def test_native_keeps_editor_files_byte_identical(native_tune_path, tmp_path):
     """A PSID-wrapped editor song exports back to its image byte-for-byte."""
     song = reader.read(native_tune_path)
     out = writer.write(song, tmp_path / "song.prg", container="native")
-    expected = bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + song.image
+    expected = reader.load_prefix(song.load_addr) + song.image
     assert out.read_bytes() == expected
 
 
@@ -135,7 +135,7 @@ def test_build_native_matches_write(tune_path, tmp_path):
     base, body = native.assemble(song, 0x4000)
     assert writer.build_native(song, 0x4000) == body
     out = writer.write(song, tmp_path / "song.prg", container="native", base=0x4000)
-    assert out.read_bytes() == bytes((base & 0xFF, base >> 8)) + body
+    assert out.read_bytes() == reader.load_prefix(base) + body
 
 
 def test_native_places_edits(tune_path):
@@ -215,7 +215,7 @@ def test_native_rejects_operand_into_unplaced_data(tune_path, monkeypatch):
 
     def with_stray(image, *args):
         code = real(image, *args)
-        image.mem[lay.entry + 1 : lay.entry + 3] = bytes((stray & 0xFF, stray >> 8))
+        image.mem[lay.entry + 1 : lay.entry + 3] = reader.load_prefix(stray)
         return {**code, lay.entry: 3}
 
     monkeypatch.setattr(native, "walk_code", with_stray)
@@ -237,7 +237,7 @@ def test_order_hook_build_exports_in_editor_order(tune):
 
 
 def _image(code: bytes, at: int = 0x1000) -> SidImage:
-    return SidImage.from_prg(bytes((at & 0xFF, at >> 8)) + code)
+    return SidImage.from_prg(reader.load_prefix(at) + code)
 
 
 @pytest.mark.parametrize(

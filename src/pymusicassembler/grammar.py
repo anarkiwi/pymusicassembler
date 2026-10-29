@@ -34,6 +34,13 @@ PROGRAM = "program"
 PROGRAM_JUMP = "program_jump"
 START = (PATTERN, ORDERLIST, ORDERLIST_HOOK, ORDERLIST_INLINE, PROGRAM, PROGRAM_JUMP)
 
+# Orderlist entry ids each orderlist rule reads as commands, not patterns.
+COMMANDS = {
+    ORDERLIST: frozenset(),
+    ORDERLIST_HOOK: frozenset({constants.ORDER_JUMP}),
+    ORDERLIST_INLINE: frozenset({constants.ORDER_TEMPO, constants.ORDER_JUMP}),
+}
+
 
 class Parsed(NamedTuple):
     """A parsed stream: its model and the bytes it spans, terminator included."""

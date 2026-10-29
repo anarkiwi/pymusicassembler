@@ -146,6 +146,19 @@ PROGRAM_JUMP_CODE = CodePattern("C9 FD D0 ?? C8 BD {cell:w} 18 69 03 8D")
 
 PROGRAM_JUMP = constants.PROGRAM_JUMP
 
+# The song-data tables the player reads through, by Layout field.
+TABLES = (
+    "order_lo",
+    "order_hi",
+    "pattern_lo",
+    "pattern_hi",
+    "instr",
+    "freq_lo",
+    "freq_hi",
+    "inner_lo",
+    "inner_hi",
+)
+
 
 @dataclass(frozen=True)
 class Layout:
@@ -249,6 +262,10 @@ class Layout:
     pulse_always: bool = False
     output_voices: Tuple[int, ...] = (0, 1, 2)
     variant: Optional[Variant] = field(default=None, compare=False, repr=False)
+
+    def tables(self) -> dict:
+        """``{name: base}`` of every song-data table (:data:`TABLES`)."""
+        return {name: getattr(self, name) for name in TABLES}
 
     def as_info(self) -> dict:
         """The build's variant facets and their provenance, for the survey ``info``."""
