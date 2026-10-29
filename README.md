@@ -8,6 +8,10 @@ register output, WAV rendering through an emulated SID, write-back, and the
 native editor formats of every editor version: the `S.` song export and the
 `P.` preset bank (read, write, and apply to a song).
 
+Patterns, orderlists and arpeggio programs are read, checked and printed with a
+Music Assembler [Lark](https://github.com/lark-parser/lark) grammar of what the
+player reads ([docs/format.md](docs/format.md#song-grammar)).
+
 Consumes `.sid` files (PSID/RSID containers) and bare `.prg` images through the
 shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) base: every
 work cell and table of the player is located from the player code's own operands
@@ -17,7 +21,7 @@ emulator, so subtune selection and packed/relocating rips play as on a C64.
 ## Install
 
 ```bash
-pip install pymusicassembler   # reader/writer/player/reglog and WAV rendering (pyresidfp)
+pip install pymusicassembler   # reader/writer/player/reglog, song grammar (lark), WAV (pyresidfp)
 ```
 
 ## Usage

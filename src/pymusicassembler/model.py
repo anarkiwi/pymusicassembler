@@ -78,6 +78,26 @@ class NoteEvent:
     control: int  # the trailing note-control byte ($1141)
     args: tuple = ()  # inline filter/vibrato argument bytes
 
+    @property
+    def duration(self) -> int:
+        """Rows the note lasts (the control byte's low five bits)."""
+        return self.control & constants.CTL_DUR_MASK
+
+    @property
+    def tied(self) -> bool:
+        """The note changes pitch without retriggering the instrument."""
+        return bool(self.control & constants.CTL_TRIGGERED)
+
+    @property
+    def vibrato(self) -> bool:
+        """The vibrato runs in place of the instrument's arpeggio."""
+        return bool(self.control & constants.CTL_VIBARP)
+
+    @property
+    def filter(self) -> bool:
+        """The note takes the filter (``args``: start cutoff, sweep length)."""
+        return bool(self.control & constants.CTL_FILTER)
+
 
 @dataclass(frozen=True)
 class InstrumentEvent:
@@ -108,58 +128,14 @@ class Pattern:
         return bytes(list(self.data) + [constants.PATTERN_END])
 
     def events(self) -> List[PatternEvent]:
-        """Decode the raw bytes into typed events (for inspection).
+        """The pattern's rows as typed events, parsed with the pattern grammar.
 
-        Mirrors the player's pattern walk: ``$80-$9F`` selects an
-        instrument and the following byte may continue into a note;
-        ``$A0-$FE`` and ``$60-$7F`` are duration tokens; ``<0x60`` is a
-        note whose control byte (and any inline filter/vibrato args)
-        follows.  Decoding is best-effort and never consumes past the
-        end of ``data``.
+        Raises :class:`~pymusicassembler.errors.MusicAssemblerParseError` when
+        ``data`` plus the terminator is not exactly one pattern.
         """
-        events: List[PatternEvent] = []
-        data = self.data
-        i = 0
-        n = len(data)
-        while i < n:
-            val = data[i]
-            if val >= constants.INSTR_MIN:
-                if val >= constants.LONGDUR_MIN:  # long-duration token
-                    events.append(
-                        DurationEvent(val & constants.CTL_DUR_MASK, long=True)
-                    )
-                    i += 1
-                    continue
-                events.append(InstrumentEvent(val & 0x1F))  # instrument select
-                i += 1
-                if i < n and data[i] >= constants.DUR_MIN:
-                    events.append(DurationEvent(data[i] & constants.CTL_DUR_MASK))
-                    i += 1
-                    continue
-                if i >= n:
-                    break
-                val = data[i]
-            elif val >= constants.DUR_MIN:  # bare duration token
-                events.append(DurationEvent(val & constants.CTL_DUR_MASK))
-                i += 1
-                continue
-            # a note (val < 0x60)
-            note = val
-            i += 1
-            if i >= n:
-                events.append(NoteEvent(note, 0))
-                break
-            ctl = data[i]
-            i += 1
-            args: List[int] = []
-            if ctl >= constants.CTL_FILTER:
-                args = data[i : i + 2]
-                i += 2
-            elif ctl & constants.CTL_VIBARP:
-                args = data[i : i + 2]
-                i += 2
-            events.append(NoteEvent(note, ctl, tuple(args)))
-        return events
+        from pymusicassembler import grammar  # the grammar builds model objects
+
+        return grammar.parse_exact(self.to_bytes(), grammar.PATTERN)
 
 
 @dataclass
@@ -294,40 +270,20 @@ class PresetBank:
                 f"preset bank body must be {constants.PRESET_BANK_BODY} bytes, "
                 f"got {len(data)}"
             )
+        from pymusicassembler import grammar  # the grammar builds model objects
+
         arpeggios: List[Optional[Arpeggio]] = []
         slot_len = constants.PRESET_BANK_ARP_SLOT
         for i in range(constants.ARP_COUNT):
             slot = data[i * slot_len : (i + 1) * slot_len]
-            if not any(slot):
-                arpeggios.append(None)
-                continue
-            rows: List[ArpeggioRow] = []
-            cur = 0
-            terminator = None
-            while cur < slot_len:
-                marker = slot[cur]
-                if marker in (
-                    constants.PROGRAM_JUMP,
-                    constants.PROGRAM_STOP,
-                    constants.PROGRAM_RESTART,
-                ):
-                    terminator = marker
-                    break
-                if cur + constants.ARP_ROW_LEN > slot_len:
-                    raise MusicAssemblerError(
-                        f"arpeggio slot {i} rows overrun the "
-                        f"{slot_len}-byte bank slot without a terminator"
-                    )
-                rows.append(
-                    ArpeggioRow(
-                        wave=slot[cur],
-                        note=slot[cur + 1],
-                        filter=slot[cur + 2],
-                    )
+            try:
+                arpeggios.append(
+                    grammar.parse_prefix(slot, grammar.PROGRAM_JUMP).model
+                    if any(slot)
+                    else None
                 )
-                cur += constants.ARP_ROW_LEN
-            jump = slot[cur + 1] if terminator == constants.PROGRAM_JUMP else None
-            arpeggios.append(Arpeggio(rows=rows, terminator=terminator, jump=jump))
+            except MusicAssemblerError as exc:
+                raise MusicAssemblerError(f"arpeggio slot {i}: {exc}") from exc
         arps_off = constants.ARP_COUNT * slot_len
         rec = constants.INSTR_RECORD_SIZE
         presets = [

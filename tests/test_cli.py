@@ -60,3 +60,12 @@ def test_error_exit_code(tmp_path):
 def test_requires_subcommand():
     with pytest.raises(SystemExit):
         cli.main([])
+
+
+def test_grammar(tune_path, capsys):
+    assert cli.main(["grammar", str(tune_path)]) == 0
+    out = capsys.readouterr().out
+    assert "voice 0 orderlist:\n  orderlist" in out
+    assert "pattern 0:\n  pattern" in out
+    assert "PATTERN_END=$ff" in out
+    assert "ORDER_LOOP=$ff" in out or "SILENCE=$fe" in out or "ORDER_JUMP=$fd" in out

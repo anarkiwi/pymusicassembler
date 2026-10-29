@@ -22,7 +22,7 @@ from typing import Optional
 
 from pysidtracker import SidError, SidImage, write_psid
 
-from pymusicassembler import constants, native, reader
+from pymusicassembler import constants, grammar, native, reader
 from pymusicassembler.errors import SidParseError, SongValidationError
 from pymusicassembler.model import PresetBank, Song
 
@@ -65,7 +65,7 @@ def validate(song: Song) -> None:
 
 
 def _repack_inner_programs(
-    image: SidImage, bases: dict, load: int, image_len: int, inner_programs
+    image: SidImage, lay, load: int, image_len: int, inner_programs
 ) -> None:
     """Re-emit the stored arpeggio programs and their pointer-table entries.
 
@@ -76,7 +76,8 @@ def _repack_inner_programs(
     stored = [i for i, prog in enumerate(inner_programs) if prog is not None]
     if not stored:
         return
-    lo, hi = bases["inner_lo"], bases["inner_hi"]
+    lo, hi = lay.inner_lo, lay.inner_hi
+    rule = grammar.program_rule(lay)
     end = load + image_len
     if not (load <= lo < end and load <= hi < end):
         raise SongValidationError("inner programs need a pointer table in the image")
@@ -89,7 +90,8 @@ def _repack_inner_programs(
     pack_end = end
     if anchored:
         pack_end = max(
-            original[i] + len(reader.parse_program(image, original[i], end).to_bytes())
+            original[i]
+            + len(reader.parse_program(image, original[i], end, rule).to_bytes())
             for i in anchored
         )
     cursor = min((original[i] for i in anchored), default=image.end)
@@ -122,7 +124,7 @@ def _repack_inner_programs(
         if not (ptr and load <= ptr < end):
             continue
         try:
-            reader.parse_program(image, ptr, end)
+            reader.parse_program(image, ptr, end, rule)
         except SidParseError:
             continue
         _put(image, lo + i, (0,))
@@ -140,9 +142,11 @@ def build(song: Song) -> bytes:
     load = song.load_addr
     image = reader.load_view(song.image, load)
     try:
-        bases = reader.discover_bases(image, load, len(song.image))
+        lay = reader.discover_layout(image, load, load, load + len(song.image))
     except SidParseError as exc:
         raise SongValidationError(str(exc)) from exc
+    grammar.check(song, lay)
+    bases = {name: getattr(lay, name) for name in reader.TABLES}
 
     # Orderlists: re-emit each voice's entries and exact terminator at its pointer address.
     for voice, orderlist in enumerate(song.orderlists):
@@ -151,6 +155,8 @@ def build(song: Song) -> bytes:
 
     # Patterns: write each pattern's raw bytes + terminator at its address.
     for pattern_id, pattern in enumerate(song.patterns):
+        if pattern is None:  # an id the player never reads
+            continue
         addr = image.ptr(bases["pattern_lo"], bases["pattern_hi"], pattern_id)
         _put(image, addr, pattern.to_bytes())
 
@@ -169,7 +175,7 @@ def build(song: Song) -> bytes:
         _put(image, bases["freq_hi"], song.freq_hi)
 
     # Arpeggio (inner) programs + their pointer-table entries.
-    _repack_inner_programs(image, bases, load, len(song.image), song.inner_programs)
+    _repack_inner_programs(image, lay, load, len(song.image), song.inner_programs)
 
     return _trim_zero_fill(image.to_prg()[2:], len(song.image))
 

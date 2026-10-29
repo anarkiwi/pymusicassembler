@@ -41,6 +41,7 @@ ma.write_presets(ma.read_presets("P.TUNE.p"), "P.COPY.p")
 
 ```bash
 pymusicassembler info   tune.sid
+pymusicassembler grammar tune.sid           # parse tree of every orderlist, pattern and program
 pymusicassembler reglog tune.sid tune.reglog --seconds 30
 pymusicassembler wav    tune.sid tune.wav    --seconds 30 --model 8580
 pymusicassembler resave tune.sid out.sid     # round-trip write-back (see docs/format.md)
@@ -72,6 +73,11 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  #
   with play address 0 plays every interrupt its init installs (raster, CIA
   IRQs, NMI digis, a main loop) on `pysidtracker.irqhost.InterruptPlayer`,
   one frame per play-source raise as the oracle frames it.
+- `grammar` — the [song grammar](format.md#song-grammar):
+  `parse_prefix(data, rule) -> Parsed(model, size)` / `parse_exact(data, rule)`
+  (a pattern's events, an `Orderlist`, an `Arpeggio`), `tree(data, rule)` and
+  `render(tree)`, `orderlist_rule(layout)` / `program_rule(layout)` (the
+  build's start rule), `streams(song, layout)` and `check(song, layout)`.
 - `formats.MUSIC_ASSEMBLER` — the `musicassembler` `pysidtracker.SidFormat`
   (entry point `pysidtracker.formats`), so `pysidtracker info|reglog|wav` play
   Music Assembler tunes and `format:musicassembler` names this player in
@@ -83,6 +89,7 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  #
 - `iter_register_writes` / `read_reglog` / `write_reglog` / `RegWrite`.
 - Model: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
   `PresetBank`, and the decoded pattern events `NoteEvent` / `InstrumentEvent`
-  / `DurationEvent` (`Pattern.events()`).
+  / `DurationEvent` (`Pattern.events()`). `Song.patterns[i]` is `None` for an
+  id no orderlist plays whose pointer reaches no pattern.
 - Errors: `MusicAssemblerError`, `MusicAssemblerParseError` (a
   `pysidtracker.SidParseError`; alias `SidParseError`), `SongValidationError`.

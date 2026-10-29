@@ -21,7 +21,8 @@ classifiers = [
 ]
 # EmuPlayer boot, render_player_*, cadence_info and the media-aware
 # `fixtures fetch` back the player, audio, survey renderer and test fixtures.
-dependencies = ["pysidtracker>=0.38.0"]
+# lark parses the song streams (patterns, orderlists, arpeggio programs).
+dependencies = ["lark>=1.2", "pysidtracker>=0.38.0"]
 
 [project.optional-dependencies]
 dev = [
@@ -48,6 +49,9 @@ Issues = "https://github.com/anarkiwi/pymusicassembler/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pymusicassembler = ["*.lark"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

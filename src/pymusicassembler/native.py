@@ -10,7 +10,7 @@ from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 from pysidtracker import OP_LEN, SidImage
 
-from pymusicassembler import constants, reader
+from pymusicassembler import constants, grammar, reader
 from pymusicassembler.errors import SidParseError, SongValidationError
 from pymusicassembler.layout import JMP_ABS, JSR_ABS, Layout
 from pymusicassembler.model import Song
@@ -184,8 +184,11 @@ def _place(items: List[_Item], view: SidImage, start: int, tmpl_end: int):
 def _was_program(view: SidImage, lay: Layout, slot: int, region: range) -> bool:
     """True when the source's ``slot`` pointer reads as a program (else a placeholder)."""
     addr = view.ptr(lay.inner_lo, lay.inner_hi, slot)
+    rule = grammar.program_rule(lay)
     try:
-        return addr in region and bool(reader.parse_program(view, addr, region.stop))
+        return addr in region and bool(
+            reader.parse_program(view, addr, region.stop, rule)
+        )
     except SidParseError:
         return False
 
@@ -201,19 +204,33 @@ def _items(song: Song, view: SidImage, lay: Layout, region: range) -> List[_Item
     items = []
     ntab = abs(lay.pattern_lo - lay.pattern_hi)
     for pid, pat in enumerate(song.patterns):
+        if pat is None:  # the player never reads it: no data to place
+            continue
         addr = source(lay.pattern_lo, lay.pattern_hi, pid) if pid < ntab else _NO_ADDR
-        size = len(reader.parse_pattern(view, bases, pid).to_bytes())
+        size = (
+            len(reader.parse_pattern(view, bases, pid).to_bytes())
+            if addr < _NO_ADDR
+            else 0
+        )
         items.append(_Item((0, addr, pid), addr, size, pat.to_bytes(), (pid,)))
     for voice, orderlist in enumerate(song.orderlists):
         addr = source(lay.order_lo, lay.order_hi, voice)
-        size = len(reader.parse_orderlist(view, bases, voice).to_bytes())
+        size = len(
+            reader.parse_orderlist(
+                view, bases, voice, grammar.orderlist_rule(lay)
+            ).to_bytes()
+        )
         items.append(_Item((1, -voice, 0), addr, size, orderlist.to_bytes(), (voice,)))
     for i, prog in enumerate(song.inner_programs):
         if prog is None:
             continue
         addr = source(lay.inner_lo, lay.inner_hi, i)
         try:
-            size = len(reader.parse_program(view, addr, region.stop).to_bytes())
+            size = len(
+                reader.parse_program(
+                    view, addr, region.stop, grammar.program_rule(lay)
+                ).to_bytes()
+            )
         except SidParseError:
             addr, size = _NO_ADDR, 0
         items.append(_Item((2, addr, i), addr, size, prog.to_bytes(), (i,)))
@@ -228,6 +245,7 @@ def assemble(song: Song, base: Optional[int] = None) -> Tuple[int, bytes]:
     """
     # pylint: disable=too-many-locals  # one variable per table
     view, lay, src = _source(song)
+    grammar.check(song, lay)
     src_end = song.load_addr + len(song.image)
     base = src if base is None else base
     if not constants.NATIVE_BASE_MIN <= base <= constants.NATIVE_BASE_MAX:
@@ -272,7 +290,10 @@ def assemble(song: Song, base: Optional[int] = None) -> Tuple[int, bytes]:
     for item in items:
         found[item.order[0]].update(dict.fromkeys(item.ids, at[item]))
     pattern_at, order_at, program_at = found
-    ptrs = [pattern_at[pid] for pid in range(len(song.patterns))] + [0]
+    ptrs = [
+        pattern_at.get(pid, view.ptr(lay.pattern_lo, lay.pattern_hi, pid))
+        for pid in range(len(song.patterns))
+    ] + [0]
     data[pattern_hi - start : pattern_hi - start + npat] = bytes(a >> 8 for a in ptrs)
     data[pattern_lo - start : pattern_lo - start + npat] = bytes(a & 0xFF for a in ptrs)
 

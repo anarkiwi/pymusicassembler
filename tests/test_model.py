@@ -3,7 +3,7 @@
 import pytest
 
 from pymusicassembler import constants
-from pymusicassembler.errors import MusicAssemblerError
+from pymusicassembler.errors import MusicAssemblerError, MusicAssemblerParseError
 from pymusicassembler.model import (
     Arpeggio,
     ArpeggioRow,
@@ -84,9 +84,10 @@ def test_pattern_events_vibrato_args():
     assert events == [NoteEvent(0x18, 0x21, (0x10, 0x00))]
 
 
-def test_pattern_events_truncated_note():
-    # a trailing lone note byte with no control byte decodes safely.
-    assert Pattern(data=[0x10]).events() == [NoteEvent(0x10, 0)]
+def test_pattern_events_reject_a_truncated_note():
+    """A lone note byte is no pattern: the player reads the $FF as its control byte."""
+    with pytest.raises(MusicAssemblerParseError, match="no terminator"):
+        Pattern(data=[0x10]).events()
 
 
 def test_arpeggio_row_bytes():
@@ -116,3 +117,35 @@ def test_arpeggio_jump_bytes():
 
 def test_song_inner_programs_default_empty():
     assert Song().inner_programs == [None] * constants.ARP_COUNT
+
+
+@pytest.mark.parametrize(
+    "control,duration,tied,vibrato,filtered",
+    [
+        (0x05, 5, False, False, False),
+        (0x45, 5, True, False, False),
+        (0x3F, 31, False, True, False),
+        (0x61, 1, True, True, False),
+        (0x83, 3, False, False, True),
+        (0xE0, 0, True, True, True),
+    ],
+)
+def test_note_event_control_fields(control, duration, tied, vibrato, filtered):
+    """The control byte: low five bits rows, bit 6 tie, bit 5 vibrato, bit 7 filter."""
+    event = NoteEvent(0x10, control)
+    assert (event.duration, event.tied, event.vibrato, event.filter) == (
+        duration,
+        tied,
+        vibrato,
+        filtered,
+    )
+
+
+def test_note_event_args_follow_vibrato_or_filter():
+    """A note carries two argument bytes exactly when vibrato or filter is set."""
+    events = Pattern(data=[0x10, 0x05, 0x11, 0x23, 1, 2, 0x12, 0x84, 3, 4]).events()
+    assert [(e.vibrato or e.filter, len(e.args)) for e in events] == [
+        (False, 0),
+        (True, 2),
+        (True, 2),
+    ]

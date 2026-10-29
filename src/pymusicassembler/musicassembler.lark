@@ -1,0 +1,103 @@
+// Music Assembler song streams, as the editor stores them and the play
+// routine reads them.
+//
+// Each stream is the run of bytes one of the player's 8-bit cursors walks from
+// a pointer-table entry: a pattern (pattern_lo/pattern_hi), a voice's
+// orderlist (order_lo/order_hi) or an arpeggio program (inner_lo/inner_hi).
+// Input is one character per byte (latin-1). A stream ends at its terminator;
+// the bytes stored after it (_TAIL) are never read through that pointer.
+// Start rules suffixed with a build name accept that build's extra commands.
+
+// ---------------------------------------------------------------------------
+// Pattern: rows, one per duration countdown, until an $FF at a row start. The
+// player reads a row before testing for $FF, so for an empty pattern (a bare
+// $FF) it plays the $FF as a hold and walks on into the following bytes.
+
+pattern: row* PATTERN_END _TAIL?
+
+?row: note | rest | hold | select
+
+// pitch (+ orderlist transpose) indexes the note-frequency tables; the control
+// byte's low five bits are the row's duration, bit 6 ties the note (no
+// instrument retrigger), bit 5 runs the vibrato in place of the instrument's
+// arpeggio. Bit 7 takes the filter to this voice (bit 5 then keeps the
+// previous vibrato steps).
+note: NOTE (plain | vibrato | filter)
+plain: CONTROL
+vibrato: CONTROL_VIBRATO BYTE BYTE  // frequency step lo, hi per frame
+filter: CONTROL_FILTER BYTE BYTE    // start cutoff (low nibble: sweep step),
+                                    // sweep length (0: no voice filtered)
+
+rest: REST    // gate off for (byte & $1F) rows
+hold: HOLD    // the sounding note continues for (byte & $1F) rows
+
+// an instrument select applies to the note it is followed by; any byte from
+// $60 is instead a rest (gate off for byte & $1F rows) under that instrument
+select: INSTRUMENT (note | select_rest)
+select_rest: SELECT_REST
+
+NOTE: /[\x00-\x5f]/
+REST: /[\x60-\x7f]/
+INSTRUMENT: /[\x80-\x9f]/
+HOLD: /[\xa0-\xfe]/
+PATTERN_END: /\xff/
+SELECT_REST: /[\x60-\xff]/
+CONTROL: /[\x00-\x1f\x40-\x5f]/
+CONTROL_VIBRATO: /[\x20-\x3f\x60-\x7f]/
+CONTROL_FILTER: /[\x80-\xff]/
+
+// ---------------------------------------------------------------------------
+// Orderlist: (pattern id, transpose << 4 | repeat) entries, read by the
+// orderlist step when a pattern's repeats run out. $FF loops to the build's
+// restart entry; a single $FE parks the voice on the silence pattern. The
+// order-hook build adds the $FD n jump to entry n, the later build also the
+// $FC t tempo reload.
+
+orderlist: entry* order_end _TAIL?
+orderlist_hook: entry_hook* (order_end | jump) _TAIL?
+orderlist_inline: (entry_inline | tempo)* (order_end | jump) _TAIL?
+
+entry: PATTERN BYTE
+entry_hook: PATTERN_HOOK BYTE -> entry
+entry_inline: PATTERN_INLINE BYTE -> entry
+tempo: ORDER_TEMPO BYTE
+jump: ORDER_JUMP BYTE
+?order_end: loop | silence
+loop: ORDER_LOOP
+silence: SILENCE
+
+PATTERN: /[\x00-\xfd]/
+PATTERN_HOOK: /[\x00-\xfc]/
+PATTERN_INLINE: /[\x00-\xfb]/
+ORDER_TEMPO: /\xfc/
+ORDER_JUMP: /\xfd/
+SILENCE: /\xfe/
+ORDER_LOOP: /\xff/
+
+// ---------------------------------------------------------------------------
+// Arpeggio (wave) program, run each frame for an instrument whose flags' low
+// nibble selects it: (waveform, pitch, cutoff) rows. The pitch is relative to
+// the note (absolute from $80 on builds that test bit 7), the cutoff is
+// written when non-zero. A row-start $FF restarts the program, $FE stops it;
+// the later build's $FD r continues at row r.
+
+program: program_row* program_end _TAIL?
+program_jump: program_row_jump* (program_end | row_jump) _TAIL?
+
+program_row: WAVE BYTE BYTE
+program_row_jump: WAVE_JUMP BYTE BYTE -> program_row
+row_jump: PROGRAM_JUMP BYTE
+?program_end: stop | restart
+stop: PROGRAM_STOP
+restart: PROGRAM_RESTART
+
+WAVE: /[\x00-\xfd]/
+WAVE_JUMP: /[\x00-\xfc]/
+PROGRAM_JUMP: /\xfd/
+PROGRAM_STOP: /\xfe/
+PROGRAM_RESTART: /\xff/
+
+// ---------------------------------------------------------------------------
+
+BYTE: /[\x00-\xff]/
+_TAIL: /[\x00-\xff]+/

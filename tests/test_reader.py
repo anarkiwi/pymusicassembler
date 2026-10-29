@@ -6,7 +6,7 @@ import pytest
 
 from pysidtracker import SidImage, write_psid
 
-from pymusicassembler import Player, constants, reader, writer
+from pymusicassembler import Player, constants, grammar, reader, writer
 from pymusicassembler.errors import SidParseError
 from pymusicassembler.model import Arpeggio, ArpeggioRow, Instrument, Pattern
 from pymusicassembler.reader import parse, read
@@ -58,7 +58,7 @@ def test_patterns_and_instruments(tune_path):
 )
 def test_instrument_ids_come_from_the_grammar(data, expected):
     """Only $80-$9F bytes at an event position select an instrument (#25)."""
-    assert reader._referenced_instrument_ids([Pattern(data)]) == expected
+    assert reader._selected_instruments([Pattern(data).events()]) == expected
 
 
 def test_control_bytes_add_no_instruments(tune_path):
@@ -244,24 +244,39 @@ def test_pattern_keeps_inline_ff_args(tune_path):
 
 
 @pytest.mark.parametrize(
-    "data,jump,count,terminator",
+    "data,rule,count,terminator",
     [
         # $FF terminator: two normal entries, then the loop marker.
-        ((0x01, 0x00, 0x02, 0x10, 0xFF), None, 2, constants.ORDER_END),
+        ((0x01, 0x00, 0x02, 0x10, 0xFF), grammar.ORDERLIST, 2, constants.ORDER_END),
         # single-byte $FE silence: the 0x35 after it is the next voice's data, not swallowed.
-        ((0x01, 0x00, 0xFE, 0x35), None, 2, constants.SILENCE_PATTERN),
+        ((0x01, 0x00, 0xFE, 0x35), grammar.ORDERLIST, 2, constants.SILENCE_PATTERN),
         # $FD n jump (the player honours $FD): the jump entry is the terminator.
-        ((0x01, 0x00, 0xFD, 0x02), constants.ORDER_JUMP, 2, constants.ORDER_JUMP),
+        (
+            (0x01, 0x00, 0xFD, 0x02),
+            grammar.ORDERLIST_HOOK,
+            2,
+            constants.ORDER_JUMP,
+        ),
         # $FD with no jump command: a plain pattern, and $FF ends the list.
-        ((0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF), None, 3, constants.ORDER_END),
+        (
+            (0x01, 0x00, 0xFD, 0x00, 0x05, 0x00, 0xFF),
+            grammar.ORDERLIST,
+            3,
+            constants.ORDER_END,
+        ),
+        # the later build's $FC t tempo is an entry; $FD n still ends the list.
+        (
+            (0xFC, 0x05, 0x01, 0x00, 0xFD, 0x00),
+            grammar.ORDERLIST_INLINE,
+            3,
+            constants.ORDER_JUMP,
+        ),
     ],
 )
-def test_orderlist_ends_where_the_player_stops_reading(data, jump, count, terminator):
+def test_orderlist_ends_where_the_player_stops_reading(data, rule, count, terminator):
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(data), 0x1000)
     bases = {"order_lo": 0x1000, "order_hi": 0x1001}
-    orderlist = reader.parse_orderlist(  # pylint: disable=protected-access
-        view, bases, 0, jump
-    )
+    orderlist = reader.parse_orderlist(view, bases, 0, rule)
     assert len(orderlist.entries) == count
     assert orderlist.terminator == terminator
 
@@ -286,9 +301,7 @@ def test_jump_entry_carries_its_target():
         bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFD, 0x04)), 0x1000
     )
     bases = {"order_lo": 0x1000, "order_hi": 0x1001}
-    orderlist = reader.parse_orderlist(  # pylint: disable=protected-access
-        view, bases, 0, constants.ORDER_JUMP
-    )
+    orderlist = reader.parse_orderlist(view, bases, 0, grammar.ORDERLIST_HOOK)
     assert orderlist.terminator == constants.ORDER_JUMP
     assert orderlist.entries[-1].pattern_id == constants.ORDER_JUMP
     assert orderlist.entries[-1].control_byte() == 0x04
