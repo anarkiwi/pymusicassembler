@@ -1,4 +1,4 @@
-"""Command line interface: song info, register logs, and WAV rendering."""
+"""Command line interface: song info, stream grammars, register logs, WAV, resave."""
 
 import argparse
 import sys
@@ -6,7 +6,7 @@ import sys
 from pysidtracker.audio import seconds_to_frames
 from pysidtracker.cli import add_reglog_command, add_wav_command, run_cli
 
-from pymusicassembler import audio, constants, reglog, writer
+from pymusicassembler import audio, constants, grammar, reglog, writer
 from pymusicassembler.errors import MusicAssemblerError
 from pymusicassembler.reader import read
 
@@ -25,6 +25,14 @@ def _info(args) -> None:
     for voice, orderlist in enumerate(song.orderlists):
         ids = " ".join(f"{e.pattern_id:02X}" for e in orderlist.entries)
         print(f"  voice {voice}: {len(orderlist.entries)} entries [{ids}]")
+
+
+def _grammar(args) -> None:
+    song = read(args.song, args.subtune)
+    for name, stream, rule in grammar.streams(song, song.layout):
+        print(f"{name}:")
+        for line in grammar.render(grammar.tree(stream.to_bytes(), rule)):
+            print(f"  {line}")
 
 
 def _reglog(args) -> None:
@@ -58,6 +66,13 @@ def _parser() -> argparse.ArgumentParser:
     info = commands.add_parser("info", help="print song metadata")
     info.add_argument("song", help=_SONG_HELP)
     info.set_defaults(func=_info)
+
+    trees = commands.add_parser(
+        "grammar", help="print every orderlist, pattern and program parse tree"
+    )
+    trees.add_argument("song", help=_SONG_HELP)
+    trees.add_argument("--subtune", type=int, default=0, help="0-based subtune")
+    trees.set_defaults(func=_grammar)
 
     add_reglog_command(commands, _reglog, song_help=_SONG_HELP)
     add_wav_command(commands, _wav, song_help=_SONG_HELP)

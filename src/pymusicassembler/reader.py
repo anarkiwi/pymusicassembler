@@ -16,15 +16,13 @@ from pysidtracker import (
     read_bytes,
 )
 
-from pymusicassembler import constants, layout
+from pymusicassembler import constants, grammar, layout
 from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.player import Player
 from pymusicassembler.model import (
     Arpeggio,
-    ArpeggioRow,
     Instrument,
     InstrumentEvent,
-    OrderEntry,
     Orderlist,
     Pattern,
     PresetBank,
@@ -95,12 +93,6 @@ def discover_layout(image: SidImage, play: int, start: int, end: int) -> layout.
     return lay
 
 
-def discover_bases(image: SidImage, load: int, image_len: int, play=None) -> dict:
-    """Per-tune table base addresses of the player in ``[load, load + image_len)``."""
-    lay = discover_layout(image, load if play is None else play, load, load + image_len)
-    return {name: getattr(lay, name) for name in TABLES}
-
-
 def load_view(image: bytes, load: int) -> SidImage:
     """Absolute-addressed read view of ``image`` placed at ``load``.
 
@@ -137,118 +129,57 @@ def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int
     return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
 
 
-def parse_orderlist(
-    img: SidImage, bases: dict, voice: int, jump: Optional[int] = None
-) -> Orderlist:
-    """Voice ``voice``'s orderlist, up to and including its on-disk terminator.
+def window(img: SidImage, addr: int, size: int = grammar.REACH) -> bytes:
+    """The ``size`` bytes from ``addr`` a player cursor can reach (to ``$FFFF``)."""
+    return bytes(img.mem[addr : min(addr + size, len(img.mem))])
 
-    Ends at ``$FF``, the single-byte ``$FE`` silence (the player parks on it
-    and never reads past), or a ``$FD n`` jump; it reads only the terminator's
-    own bytes, never the next voice's list that the editor packs after it.
+
+def parse_orderlist(
+    img: SidImage, bases: dict, voice: int, rule: str = grammar.ORDERLIST
+) -> Orderlist:
+    """Voice ``voice``'s orderlist, read with the build's orderlist ``rule``.
+
+    It ends at its own terminator (``$FF``, a single-byte ``$FE`` silence, or
+    the build's ``$FD n`` jump), never reading the next list stored after it.
     """
     addr = img.ptr(bases["order_lo"], bases["order_hi"], voice)
-    entries: List[OrderEntry] = []
-    terminator = constants.ORDER_END
-    for cur in range(0, constants.ORDER_MAX_BYTES, 2):
-        pid = img.peek(addr + cur)
-        if pid == constants.ORDER_END:
-            break
-        if pid == constants.SILENCE_PATTERN:
-            entries.append(OrderEntry(pattern_id=pid))
-            terminator = constants.SILENCE_PATTERN
-            break
-        ctl = img.peek(addr + cur + 1)
-        entries.append(OrderEntry.from_bytes(pid, ctl))
-        if jump is not None and pid == jump:
-            terminator = constants.ORDER_JUMP
-            break
-    else:
-        # No terminator within the bound: a wrong base or unsupported variant.
+    try:
+        return grammar.parse_prefix(window(img, addr), rule).model
+    except MusicAssemblerParseError as exc:
         raise MusicAssemblerParseError(
-            f"orderlist for voice {voice} at {addr:#06x} has no terminator "
-            f"within {constants.ORDER_MAX_BYTES} bytes; unsupported variant"
-        )
-    return Orderlist(entries=entries, terminator=terminator)
+            f"voice {voice} orderlist at {addr:#06x}: {exc}; unsupported variant"
+        ) from exc
+
+
+def _decode_pattern(img: SidImage, bases: dict, pattern_id: int):
+    """``(Pattern, events)`` of pattern ``pattern_id``, read with the pattern grammar."""
+    addr = img.ptr(bases["pattern_lo"], bases["pattern_hi"], pattern_id)
+    data = window(img, addr)
+    try:
+        events, size = grammar.parse_prefix(data, grammar.PATTERN)
+    except MusicAssemblerParseError as exc:
+        raise MusicAssemblerParseError(
+            f"pattern {pattern_id} at {addr:#06x}: {exc}"
+        ) from exc
+    return Pattern(data=list(data[: size - 1])), events
 
 
 def parse_pattern(img: SidImage, bases: dict, pattern_id: int) -> Pattern:
-    """Extract a pattern's raw bytes, walking the grammar so an inline
-    filter/vibrato argument byte that happens to be ``$FF`` is not mistaken
-    for the pattern terminator (the terminator is only an ``$FF`` read at a
-    row-START position, matching the player's $1187 end check)."""
-    addr = img.ptr(bases["pattern_lo"], bases["pattern_hi"], pattern_id)
-    data: List[int] = []
-    cur = 0
-    limit = 0x1000  # defensive bound
-    while cur < limit:
-        val = img.peek(addr + cur)
-        if val == constants.PATTERN_END:  # row-start terminator
-            break
-        if val >= constants.INSTR_MIN:
-            if val >= constants.LONGDUR_MIN:  # long duration: single byte
-                data.append(val)
-                cur += 1
-                continue
-            data.append(val)  # instrument select; may continue into a note
-            cur += 1
-            nxt = img.peek(addr + cur)
-            if nxt >= constants.DUR_MIN:  # instrument + bare/long duration
-                data.append(nxt)
-                cur += 1
-                continue
-            val = nxt
-        elif val >= constants.DUR_MIN:  # bare duration: single byte
-            data.append(val)
-            cur += 1
-            continue
-        # a note (val < 0x60): note byte + control byte (+ inline args).
-        data.append(val)  # note
-        cur += 1
-        ctl = img.peek(addr + cur)
-        data.append(ctl)  # control byte
-        cur += 1
-        if ctl >= constants.CTL_FILTER:  # filter command: 2 inline arg bytes
-            data.extend((img.peek(addr + cur), img.peek(addr + cur + 1)))
-            cur += 2
-        elif ctl & constants.CTL_VIBARP:  # vibrato/arp params: 2 inline bytes
-            data.extend((img.peek(addr + cur), img.peek(addr + cur + 1)))
-            cur += 2
-    return Pattern(data=data)
+    """Pattern ``pattern_id``'s rows, read with the pattern grammar."""
+    return _decode_pattern(img, bases, pattern_id)[0]
 
 
-def parse_program(img: SidImage, addr: int, limit: int) -> Arpeggio:
-    """One arpeggio program at ``addr``: its rows, then the terminating marker.
-
-    Walks like the player: a row is three bytes (wave, note, filter); a
-    row-start byte of $FF/$FE/$FD is the terminator (a $FD carries the
-    row to continue at).
-    """
-    rows: List[ArpeggioRow] = []
-    cur = 0
-    end = min(limit, addr + constants.ARP_MAX_BYTES)
-    while addr + cur < end:
-        marker = img.peek(addr + cur)
-        if marker in (
-            constants.PROGRAM_JUMP,
-            constants.PROGRAM_STOP,
-            constants.PROGRAM_RESTART,
-        ):
-            break
-        rows.append(
-            ArpeggioRow(
-                wave=img.peek(addr + cur),
-                note=img.peek(addr + cur + 1),
-                filter=img.peek(addr + cur + 2),
-            )
-        )
-        cur += constants.ARP_ROW_LEN
-    else:
+def parse_program(
+    img: SidImage, addr: int, limit: int, rule: str = grammar.PROGRAM_JUMP
+) -> Arpeggio:
+    """The arpeggio program at ``addr`` (below ``limit``), read with ``rule``."""
+    try:
+        data = window(img, addr, min(limit - addr, grammar.REACH))
+        return grammar.parse_prefix(data, rule).model
+    except MusicAssemblerParseError as exc:
         raise MusicAssemblerParseError(
-            f"arpeggio program at {addr:#06x} has no terminator within "
-            f"{constants.ARP_MAX_BYTES} bytes; unsupported variant"
-        )
-    jump = img.peek(addr + cur + 1) if marker == constants.PROGRAM_JUMP else None
-    return Arpeggio(rows=rows, terminator=marker, jump=jump)
+            f"arpeggio program at {addr:#06x}: {exc}; unsupported variant"
+        ) from exc
 
 
 def _parse_inner_programs(
@@ -265,7 +196,9 @@ def _parse_inner_programs(
         ptr = img.ptr(lay.inner_lo, lay.inner_hi, i)
         if base <= ptr < limit:
             try:
-                programs.append(parse_program(img, ptr, limit))
+                programs.append(
+                    parse_program(img, ptr, limit, grammar.program_rule(lay))
+                )
                 continue
             except MusicAssemblerParseError:
                 pass
@@ -283,17 +216,24 @@ def _referenced_pattern_ids(orderlists: List[Orderlist], commands=()) -> List[in
     return sorted(ids)
 
 
-def _referenced_instrument_ids(patterns: List[Pattern]) -> List[int]:
-    """Instrument ids the patterns select, from the decoded grammar.
+def _stored_pattern(img: SidImage, bases: dict, pattern_id: int, referenced: bool):
+    """``(Pattern, events)``, else ``(None, [])`` for an id no orderlist plays
+    whose pointer reaches no pattern (the player never reads it)."""
+    try:
+        return _decode_pattern(img, bases, pattern_id)
+    except MusicAssemblerParseError:
+        if referenced:
+            raise
+        return None, []
 
-    A ``$80-$9F`` byte is a select only at an event position: note control
-    bytes and inline filter/vibrato arguments in that range are not.
-    """
+
+def _selected_instruments(event_lists: Iterable[list]) -> List[int]:
+    """Instrument ids the pattern grammar's ``select`` rows name."""
     return sorted(
         {
             event.instrument
-            for pattern in patterns
-            for event in pattern.events()
+            for events in event_lists
+            for event in events
             if isinstance(event, InstrumentEvent)
         }
     )
@@ -368,18 +308,19 @@ def parse(data: bytes, subtune: int = 0) -> Song:
     commands = {constants.ORDER_TEMPO} if lay.order_tempo else set()
     commands |= {constants.ORDER_JUMP} if lay.order_jump else set()
 
+    rule = grammar.orderlist_rule(lay)
     orderlists = [
-        parse_orderlist(
-            img, bases, voice, constants.ORDER_JUMP if lay.order_jump else None
-        )
-        for voice in range(constants.VOICES)
+        parse_orderlist(img, bases, voice, rule) for voice in range(constants.VOICES)
     ]
 
     end = load + len(image) if img.load == load else 0  # 0: no file extent
     pattern_ids = _referenced_pattern_ids(orderlists, commands)
     stored = _stored_patterns(img, lay, end)
     npat = max([pid + 1 for pid in pattern_ids] + [stored])
-    patterns = [parse_pattern(img, bases, pid) for pid in range(npat)]
+    decoded = [
+        _stored_pattern(img, bases, pid, pid in pattern_ids) for pid in range(npat)
+    ]
+    patterns = [pattern for pattern, _ in decoded]
 
     home = min(load, lay.entry - constants.NATIVE_PLAY_OFFSET)
     inner_programs = _parse_inner_programs(img, lay, home, max(home, load) + len(image))
@@ -388,11 +329,15 @@ def parse(data: bytes, subtune: int = 0) -> Song:
         for i, p in enumerate(inner_programs)
         if p
     ]
-    data += [img.ptr(lay.pattern_lo, lay.pattern_hi, pid) for pid in range(npat)]
+    data += [
+        img.ptr(lay.pattern_lo, lay.pattern_hi, pid)
+        for pid, pattern in enumerate(patterns)
+        if pattern is not None
+    ]
     data += [
         img.ptr(lay.order_lo, lay.order_hi, voice) for voice in range(constants.VOICES)
     ]
-    instr_ids = _referenced_instrument_ids(patterns)
+    instr_ids = _selected_instruments(events for _, events in decoded)
     stored = _stored_instruments(lay, end, data)
     ninstr = max([iid + 1 for iid in instr_ids] + [stored])
     instruments = [

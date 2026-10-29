@@ -268,3 +268,15 @@ def test_walk_code_stays_in_range():
         0x1000: 3,
         0x1003: 1,
     }
+
+
+def test_native_keeps_unread_patterns_unread(tune):
+    """A song with an unplayed, unterminated pattern id rereads to the same music."""
+    song = reader.read(tune("MUSICIANS/F/Feekzoid/Missing_DigiSid_2_Trash_City.sid"))
+    assert None in song.patterns
+    out = _reread(
+        song.layout.entry - constants.NATIVE_PLAY_OFFSET, writer.build_native(song)
+    )
+    assert out.orderlists == song.orderlists
+    assert [p and p.data for p in out.patterns] == [p and p.data for p in song.patterns]
+    assert out.inner_programs == song.inner_programs

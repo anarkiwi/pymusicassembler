@@ -55,12 +55,33 @@ def test_write_synthesized_psid_replays(tune_path, tmp_path):
 
 
 def test_edit_pattern_changes_image(tune_path):
-    """Editing a pattern byte changes the emitted image at that address."""
+    """Editing a pattern changes the emitted image at that address."""
     song = reader.read(tune_path)
     before = writer.build(song)
-    song.patterns[0].data[0] = (song.patterns[0].data[0] + 1) & 0x3F
+    song.patterns[0].data[:] = [0x10, 0x05]
     after = writer.build(song)
     assert before != after
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        [0x10],  # a note whose control byte would be the terminator
+        [0x10, 0x05, 0xFF, 0x10, 0x05],  # a row-start $FF ends the pattern early
+    ],
+)
+def test_build_rejects_a_pattern_the_player_misreads(tune_path, data):
+    song = reader.read(tune_path)
+    song.patterns[0].data[:] = data
+    with pytest.raises(SongValidationError, match="pattern 0"):
+        writer.build(song)
+
+
+def test_build_rejects_an_orderlist_the_player_misreads(tune_path):
+    song = reader.read(tune_path)
+    song.orderlists[0].entries.insert(0, OrderEntry(constants.SILENCE_PATTERN))
+    with pytest.raises(SongValidationError, match="voice 0 orderlist"):
+        writer.build(song)
 
 
 @pytest.mark.parametrize(
@@ -211,3 +232,17 @@ def test_build_rejects_song_located_only_after_init():
     song = Song(layout_post_init=True)
     with pytest.raises(SongValidationError, match="read-only"):
         writer.build(song)
+
+
+def test_unreferenced_patterns_outside_the_file_rebuild(tune):
+    """Ids no orderlist plays whose pointer leaves the file are None and kept."""
+    song = reader.read(tune("MUSICIANS/F/Feekzoid/Journey-Second_Movement.sid"))
+    assert song.patterns[7] is None and song.patterns[10] is None
+    assert writer.build(song) == song.image
+
+
+def test_build_without_program_jump_rebuilds(tune):
+    """A build whose programs have no $FD jump reads $FD as wave data."""
+    song = reader.read(tune("MUSICIANS/F/Feekzoid/Journey.sid"))
+    assert song.layout.program_jump == 0
+    assert writer.build(song) == song.image

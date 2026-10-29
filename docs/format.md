@@ -35,9 +35,11 @@ tables lie outside the loaded image is read after its init runs in the emulator.
 
 `write(song, dst, container="auto"|"psid"|"prg"|"native")` writes a tune image;
 `auto` re-emits the original container. `read(write(song)) == song` and
-`build(read(image)) == image`. The reader takes the instruments the patterns
-select from the decoded grammar (a `$80-$9F` note control byte or inline
-filter/vibrato argument is not a select); a preset table placed last holds
+`build(read(image)) == image`. Every pattern, orderlist and arpeggio program is
+read and checked with the [song grammar](#song-grammar). The reader takes the
+instruments from the grammar's `select` rows (a `$80-$9F` note control byte or
+inline filter/vibrato argument is not a select). A pattern id no orderlist
+plays, whose pointer reaches no pattern, reads as `None` and is not written; a preset table placed last holds
 every record up to the image end or the next stored data (the editor saves it
 that far, so its last record may be partial), and an editor pattern table
 (`pattern_lo` = `pattern_hi` + stored patterns + 1, closed by a zero entry, all
@@ -155,26 +157,56 @@ prefix; `write_presets` emits the editor's exact form, so
 swaps the song's instruments and arpeggio programs for the bank's, so the
 same orderlists and patterns play with the bank's presets.
 
+## Song grammar
+
+The song data the play routine walks is described by one Lark grammar,
+[`musicassembler.lark`](../src/pymusicassembler/musicassembler.lark). Each
+stream is the run of bytes one of the player's 8-bit cursors reads from a
+pointer-table entry, at most `$100` bytes, one grammar character per byte.
+Rules are named for what the player does with the bytes. Start rules select
+the build's commands from the discovered layout:
+
+| Stream | Pointer table | Start rule (build) |
+| --- | --- | --- |
+| pattern | `pattern_lo`/`pattern_hi` | `pattern` (all builds) |
+| orderlist | `order_lo`/`order_hi` | `orderlist`; `orderlist_hook` (`$FD n`); `orderlist_inline` (`$FC t`, `$FD n`) |
+| arpeggio program | `inner_lo`/`inner_hi` | `program`; `program_jump` (`$FD r`) |
+
+- **Pattern** — `row* $FF`. A row is a `note` (`< $60` pitch, then a control
+  byte: low five bits duration, bit 6 tie, bit 5 vibrato with two step bytes,
+  bit 7 filter with cutoff and sweep bytes), a `rest` (`$60-$7F`, gate off), a
+  `hold` (`$A0-$FE`, the note sounds on) or a `select` (`$80-$9F`, instrument
+  `id & $1F`) followed by a note or by a rest byte `$60-$FF`. Only a row-start
+  `$FF` ends the pattern. The player reads a row before testing for `$FF`, so
+  it plays an empty pattern's lone `$FF` as a hold.
+- **Orderlist** — `(pattern_id, transpose << 4 | repeat)` entries ending in
+  `$FF` (loop to the build's restart entry) or a single `$FE` (park on the
+  silence pattern). The order-hook build ends a list on `$FD n` (jump to entry
+  `n`); the later build adds `$FC t` (tempo reload) as an entry.
+- **Arpeggio program** — `(waveform, pitch, cutoff)` rows ending at a row-start
+  `$FF` (restart) or `$FE` (stop). A `$FD r` (continue at row `r`) ends the
+  program only on builds whose player tests for it; elsewhere it is waveform
+  data.
+
+`grammar.check(song, layout)`, run by `build` and `build_native`, refuses a
+stream whose bytes the player would read back differently (a row-start `$FF`
+inside a pattern, a mid-list `$FE` entry). `pymusicassembler grammar tune.sid`
+prints every stream's parse tree.
+
 ## Data model
 
-Three independent per-voice tracks:
+Three independent per-voice tracks, each a [grammar](#song-grammar) stream:
 
-- **Orderlists** — one per voice, 2-byte entries
-  `(pattern_id, transpose << 4 | repeat)`. Each list ends in exactly one of:
-  a `$FF` byte (loop to start), a single-byte `$FE` silence entry, or a
-  `$FD n` jump entry. The reader records which ending it met and `build`
-  re-emits just that terminator — it never pads a `$FF` after `$FE` or `$FD n`
-  (which would overwrite the next voice's data packed after it).
-- **Patterns** — player bytecode: `< $60` note (+ a control byte, with two
-  inline argument bytes for a filter (`$80` bit) or vibrato/arp (`$20` bit)
-  command); `$60–$7F` bare duration; `$80–$9F` instrument select
-  (`id = value & $1F`); `$A0–$FE` long duration; `$FF` terminator.
+- **Orderlists** — one per voice. The reader records which ending it met
+  (`$FF`, `$FE` or `$FD n`) and `build` re-emits just that terminator: it never
+  pads a `$FF` after `$FE` or `$FD n`, which would overwrite the next voice's
+  data packed after it.
+- **Patterns** — the player bytecode of the `pattern` rule, stored without its
+  `$FF`; `Pattern.events()` is its parsed rows.
 - **Instruments** — 8-byte records: attack/decay, sustain/release, waveform,
   pulse-width init + sweep step, arp speed + step, porta/effect flags.
 - **Arpeggios (inner programs)** — 16 slots indexed by the instrument flags
-  low nibble, each a run of three-byte rows (`wave, note, filter`) ending in
-  one of: `$FF` (restart the program), `$FE` (stop it), or the later builds'
-  `$FD r` (continue at row `r`). The editor stores a tune's used programs
+  low nibble. The editor stores a tune's used programs
   packed back-to-back after the other tables, points the slot table
   (`inner_lo`/`inner_hi`) at them, and leaves the unused slots with
   placeholder pointers (often shared); `Song.inner_programs` holds a program
@@ -186,7 +218,8 @@ Three independent per-voice tracks:
 
 Typed model objects: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
 `Arpeggio` / `ArpeggioRow`, `PresetBank`, and the decoded pattern events
-`NoteEvent` / `InstrumentEvent` / `DurationEvent` (`Pattern.events()`).
+`NoteEvent` (`duration`, `tied`, `vibrato`, `filter`) / `InstrumentEvent` /
+`DurationEvent` (`Pattern.events()`).
 
 ### Notes vs the decompiled reference (decompile.c)
 
@@ -279,6 +312,8 @@ oracle comparison works.
   `container="native"` targets.
 - [Multi Voice Assembler](https://csdb.dk/release/?id=140932) (R. Christer) —
   an unrelated program also credited as "Music Assembler".
+- [Lark](https://github.com/lark-parser/lark) — the parser the song grammar
+  runs on.
 - [`sidtrace`](https://github.com/anarkiwi/sidtrace) — the `sidplayfp` register
   oracle the player is validated against.
 - [pyresidfp](https://pypi.org/project/pyresidfp/) — reSIDfp SID emulation

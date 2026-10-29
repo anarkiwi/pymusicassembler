@@ -44,10 +44,6 @@ ORDER_END = 0xFF  # orderlist terminator -> loop to start
 SILENCE_PATTERN = 0xFE  # orderlist pattern id $FE: gate off, no row
 ORDER_TEMPO = 0xFC  # orderlist command (later builds): set the tempo reload
 ORDER_JUMP = 0xFD  # orderlist command (later builds): jump to entry n
-# A real orderlist is at most a few hundred entries (HVSC max 471 entries =
-# 942 bytes); a bad table base walks forever, so a terminator must appear
-# within this many bytes or the tune is treated as an unsupported variant.
-ORDER_MAX_BYTES = 0x1000
 
 # Note-control byte ($1141) bit meanings (the byte after a note).
 CTL_FILTER = 0x80  # inline filter command attached
@@ -70,7 +66,6 @@ INSTR_PORTA = 7
 # Inner (arpeggio) programs, indexed by the instrument flags byte's low nibble.
 ARP_COUNT = 16
 ARP_ROW_LEN = 3  # one program row: (wave, note, filter)
-ARP_MAX_BYTES = 0x100  # a program must terminate within this many bytes
 
 # P. preset bank ("P-SAVE PRESET"): a bare .prg loading at $4300 with 16 arpeggio slots of 32 bytes, then 32 preset records (the song's Instrument layout).
 PRESET_BANK_LOAD = 0x4300
