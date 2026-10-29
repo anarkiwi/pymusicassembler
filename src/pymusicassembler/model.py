@@ -135,7 +135,7 @@ class Pattern:
         """
         from pymusicassembler import grammar  # the grammar builds model objects
 
-        return grammar.parse_exact(self.to_bytes(), grammar.PATTERN)
+        return grammar.GRAMMAR.parse_exact(self.to_bytes(), grammar.PATTERN)
 
 
 @dataclass
@@ -267,7 +267,7 @@ class PresetBank:
             slot = data[i * slot_len : (i + 1) * slot_len]
             try:
                 arpeggios.append(
-                    grammar.parse_prefix(slot, grammar.PROGRAM_JUMP).model
+                    grammar.GRAMMAR.parse_prefix(slot, grammar.PROGRAM_JUMP).model
                     if any(slot)
                     else None
                 )

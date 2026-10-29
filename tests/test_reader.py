@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from pysidtracker import SidImage, write_psid
+from pysidtracker import SidImage, load_prefix, write_psid
 
 from pymusicassembler import Player, constants, grammar, reader, writer
 from pymusicassembler.errors import SidParseError
@@ -67,7 +67,7 @@ def test_control_bytes_add_no_instruments(tune_path):
     song = read(tune_path)
     count = len(song.instruments)
     song.patterns[0] = Pattern(song.patterns[0].data + [0x24, 0x9F, 0x97, 0x2E])
-    prefix = reader.load_prefix(song.load_addr)
+    prefix = load_prefix(song.load_addr)
     assert len(parse(prefix + writer.build(song)).instruments) == count
 
 
@@ -76,7 +76,7 @@ def test_partial_last_preset_record_round_trips(tune_path):
     """A source ending part-way into its last preset record re-emits as is."""
     song = read(tune_path)
     image = song.image[:-3]
-    short = parse(reader.load_prefix(song.load_addr) + image)
+    short = parse(load_prefix(song.load_addr) + image)
     assert len(short.instruments) == len(song.instruments)
     assert short.instruments[-1] == Instrument.from_bytes(song.image[-8:-3])
     assert writer.build(short) == image
@@ -90,7 +90,7 @@ def test_load_address_is_standard(tune_path):
 def test_prg_container_round_trips(tune_path):
     """A bare .prg (load prefix + image) parses to the same image."""
     song = read(tune_path)
-    prg = reader.load_prefix(song.load_addr) + song.image
+    prg = load_prefix(song.load_addr) + song.image
     reparsed = parse(prg)
     assert reparsed.image == song.image
     assert reparsed.load_addr == song.load_addr
@@ -106,31 +106,12 @@ def test_truncated_inputs():
 
 def _prg(song, image=None):
     load = song.load_addr
-    return reader.load_prefix(load) + bytes(song.image if image is None else image)
+    return load_prefix(load) + bytes(song.image if image is None else image)
 
 
 def test_rejects_image_without_player():
     with pytest.raises(SidParseError, match="no play entry"):
         parse(bytes((0x00, 0x10)) + bytes(0x400))
-
-
-@pytest.mark.parametrize(
-    "load,length,expected",
-    [
-        (0xC000, 0x1000, False),  # ends exactly at $D000: still RAM
-        (0xC000, 0x1001, True),  # one byte past $D000
-        (0xD000, 0x01, True),  # starts at $D000
-        (0xDFFF, 0x01, True),  # last I/O byte
-        (0xE000, 0x10, False),  # above the I/O area (ROM)
-        (0x1000, 0x100, False),  # low RAM
-    ],
-)
-def test_require_ram_boundaries(load, length, expected):
-    if expected:
-        with pytest.raises(SidParseError, match="I/O area"):
-            reader.require_ram(load, length, "image")
-    else:
-        reader.require_ram(load, length, "image")
 
 
 def test_rejects_image_fully_in_io_area():
@@ -334,17 +315,16 @@ def test_jump_entry_carries_its_target():
         ),
     ],
 )
-def test_parse_program_rows_and_terminator(payload, expected):
+def test_program_rows_and_terminator(payload, expected):
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(payload), 0x1000)
-    assert (
-        reader.parse_program(view, 0x1004, 0x1010) == expected
-    )  # pylint: disable=protected-access
+    parsed = grammar.GRAMMAR.read(view, 0x1004, grammar.PROGRAM_JUMP, size=0x0C)
+    assert parsed.model == expected
 
 
-def test_parse_program_rejects_unterminated():
+def test_program_rejects_unterminated():
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(0x100), 0x1000)
     with pytest.raises(SidParseError, match="no terminator"):
-        reader.parse_program(view, 0x1004, 0x1010)  # pylint: disable=protected-access
+        grammar.GRAMMAR.read(view, 0x1004, grammar.PROGRAM_JUMP, size=0x0C)
 
 
 def test_inner_programs_are_modeled(tune_path):

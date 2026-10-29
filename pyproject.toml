@@ -21,14 +21,14 @@ classifiers = [
 ]
 # EmuPlayer boot, render_player_*, cadence_info and the media-aware
 # `fixtures fetch` back the player, audio, survey renderer and test fixtures.
-# lark parses the song streams (patterns, orderlists, arpeggio programs).
-dependencies = ["lark>=1.2", "pysidtracker>=0.38.0"]
+# lark (Transformer) builds the song-stream models under pysidtracker.bytegrammar.
+dependencies = ["lark>=1.2", "pysidtracker>=0.39.0"]
 
 [project.optional-dependencies]
 dev = [
     "black>=24",
     "pylint>=3",
-    "pysidtracker[survey]>=0.38.0",
+    "pysidtracker[survey]>=0.39.0",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",

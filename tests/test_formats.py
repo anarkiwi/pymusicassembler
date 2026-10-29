@@ -6,6 +6,7 @@ import oracle_hvsc
 from pysidtracker.formats import discover_formats, find_format
 from pysidtracker.maincli import main as pysidtracker_main
 from pysidtracker.pathdiff import subject
+from pysidtracker.snapshot import digest, fingerprint
 
 from pymusicassembler import Player
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
@@ -51,3 +52,17 @@ def test_info_command(tune_path, capsys):
     assert "musicassembler" in out
     assert f"patterns: {len(song.patterns)}" in out
     assert song.name in out
+
+
+def test_snapshot_probes_digest_build_and_native(native_tune_path, jump_tune_path):
+    """An editor song rebuilds and exports to its own image; a later build's
+    ``$FD`` program cannot be exported, which the native digest records."""
+    data = native_tune_path.read_bytes()
+    image = MUSIC_ASSEMBLER.load(data).song.image
+    assert fingerprint(data, MUSIC_ASSEMBLER) == {
+        "model": digest(MUSIC_ASSEMBLER.load(data)),
+        "build": digest(image),
+        "native": digest(image),
+    }
+    native = fingerprint(jump_tune_path.read_bytes(), MUSIC_ASSEMBLER)["native"]
+    assert native.startswith("!SongValidationError:")

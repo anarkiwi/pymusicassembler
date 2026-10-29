@@ -1,6 +1,7 @@
 """P. preset banks (the editor's P-SAVE PRESET): read, write, apply, round-trip."""
 
 import pytest
+from pysidtracker import load_prefix
 
 from pymusicassembler import constants, player, reader, writer
 from pymusicassembler.errors import MusicAssemblerError, MusicAssemblerParseError
@@ -182,7 +183,7 @@ def test_apply_to_song_reemits_and_renders(preset_bank_path, shape_song_path):
     song.apply_preset_bank(bank)
     assert song.instruments == bank.presets
     assert song.inner_programs == bank.arpeggios
-    prg = reader.load_prefix(song.load_addr) + writer.build(song)
+    prg = load_prefix(song.load_addr) + writer.build(song)
     re = reader.parse(prg)
     assert re.instruments == song.instruments
     assert re.inner_programs == song.inner_programs

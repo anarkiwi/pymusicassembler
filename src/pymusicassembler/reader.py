@@ -13,7 +13,9 @@ from pysidtracker import (
     Match,
     SidError,
     SidImage,
+    load_prefix,
     read_bytes,
+    require_ram,
 )
 
 from pymusicassembler import constants, grammar, layout
@@ -79,11 +81,6 @@ def discover_layout(image: SidImage, play: int, start: int, end: int) -> layout.
     return lay
 
 
-def load_prefix(addr: int) -> bytes:
-    """The two-byte little-endian load address a ``.prg`` starts with."""
-    return addr.to_bytes(2, "little")
-
-
 def load_view(image: bytes, load: int) -> SidImage:
     """Absolute-addressed read view of ``image`` placed at ``load``.
 
@@ -91,17 +88,6 @@ def load_view(image: bytes, load: int) -> SidImage:
     matching the reader's reliance on a zero fallback.
     """
     return SidImage.from_prg(load_prefix(load) + image)
-
-
-def require_ram(start: int, length: int, what: str, error=MusicAssemblerParseError):
-    """Raise ``error`` when ``what`` at ``[start, start+length)`` reaches the
-    C64 I/O area, where a C64 reads the VIC/SID/CIA chips instead of RAM."""
-    low, high = constants.IO_AREA
-    if start < high and start + length > low:
-        raise error(
-            f"{what} [{start:#06x},{start + length:#06x}) reaches the C64 I/O area "
-            f"{low:#06x}-{high - 1:#06x}, where the player reads live chips, not RAM"
-        )
 
 
 def _play_entry(image: SidImage, load: int, image_len: int) -> Optional[Match]:
@@ -125,19 +111,6 @@ def find_player_base(image: SidImage, load: int, image_len: int) -> Optional[int
     return match.captures["tempo"] - constants.NATIVE_TEMPO_OFFSET
 
 
-def window(img: SidImage, addr: int, size: int = grammar.REACH) -> bytes:
-    """The ``size`` bytes from ``addr`` a player cursor reads (zero past ``$FFFF``)."""
-    return bytes(img.mem[addr : addr + size]).ljust(size, b"\0")
-
-
-def _stream(img: SidImage, addr: int, rule: str, what: str, size=grammar.REACH):
-    """The :class:`~pymusicassembler.grammar.Parsed` ``rule`` stream at ``addr``."""
-    try:
-        return grammar.parse_prefix(window(img, addr, size), rule)
-    except MusicAssemblerParseError as exc:
-        raise MusicAssemblerParseError(f"{what} at {addr:#06x}: {exc}") from exc
-
-
 def parse_orderlist(
     img: SidImage, lay, voice: int, rule: str = grammar.ORDERLIST
 ) -> Orderlist:
@@ -146,28 +119,23 @@ def parse_orderlist(
     It ends at its own terminator (``$FF``, a single-byte ``$FE`` silence, or
     the build's ``$FD n`` jump), never reading the next list stored after it.
     """
-    addr = img.ptr(lay.order_lo, lay.order_hi, voice)
-    return _stream(img, addr, rule, f"voice {voice} orderlist").model
+    what = f"voice {voice} orderlist"
+    return grammar.GRAMMAR.entry(
+        img, lay.order_lo, lay.order_hi, voice, rule, what
+    ).model
 
 
 def _decode_pattern(img: SidImage, lay, pattern_id: int):
     """``(Pattern, events)`` of pattern ``pattern_id``, read with the pattern grammar."""
     addr = img.ptr(lay.pattern_lo, lay.pattern_hi, pattern_id)
-    events, size = _stream(img, addr, grammar.PATTERN, f"pattern {pattern_id}")
-    return Pattern(data=list(window(img, addr, size - 1))), events
+    what = f"pattern {pattern_id}"
+    events, size = grammar.GRAMMAR.read(img, addr, grammar.PATTERN, what)
+    return Pattern(data=list(img.window(addr, size - 1))), events
 
 
 def parse_pattern(img: SidImage, lay, pattern_id: int) -> Pattern:
     """Pattern ``pattern_id``'s rows, read with the pattern grammar."""
     return _decode_pattern(img, lay, pattern_id)[0]
-
-
-def parse_program(
-    img: SidImage, addr: int, limit: int, rule: str = grammar.PROGRAM_JUMP
-) -> Arpeggio:
-    """The arpeggio program at ``addr`` (below ``limit``), read with ``rule``."""
-    size = min(limit - addr, grammar.REACH)
-    return _stream(img, addr, rule, "arpeggio program", size).model
 
 
 def stored_program(img: SidImage, lay, slot: int, region: range) -> Optional[Arpeggio]:
@@ -176,13 +144,8 @@ def stored_program(img: SidImage, lay, slot: int, region: range) -> Optional[Arp
     The editor leaves unused slots as placeholder pointers, often shared and
     often outside the image; a slot is a program only when its bytes are one.
     """
-    addr = img.ptr(lay.inner_lo, lay.inner_hi, slot)
-    if addr not in region:
-        return None
-    try:
-        return parse_program(img, addr, region.stop, grammar.program_rule(lay))
-    except MusicAssemblerParseError:
-        return None
+    rule = grammar.program_rule(lay)
+    return grammar.GRAMMAR.stored(img, lay.inner_lo, lay.inner_hi, slot, rule, region)
 
 
 def _referenced_pattern_ids(orderlists: List[Orderlist], commands=()) -> List[int]:
@@ -267,7 +230,7 @@ def parse(data: bytes, subtune: int = 0) -> Song:
     or a rip whose init selects one of several players per subtune).
     """
     load, init, play, name, author, released, image, header = _parse_container(data)
-    require_ram(load, len(image), "tune image")
+    require_ram(load, len(image), "tune image", MusicAssemblerParseError)
     sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
     img, lay, post_init = _locate(image, load, init if sid else None, play, subtune)
     if not sid:
@@ -308,11 +271,11 @@ def parse(data: bytes, subtune: int = 0) -> Song:
     ninstr = max([iid + 1 for iid in instr_ids] + [_stored_instruments(lay, end, data)])
     rec = constants.INSTR_RECORD_SIZE
     instruments = [
-        Instrument.from_bytes(window(img, lay.instr + iid * rec, rec))
+        Instrument.from_bytes(img.window(lay.instr + iid * rec, rec))
         for iid in range(ninstr)
     ]
-    freq_lo = list(window(img, lay.freq_lo, constants.FREQ_TABLE_LEN))
-    freq_hi = list(window(img, lay.freq_hi, constants.FREQ_TABLE_LEN))
+    freq_lo = list(img.window(lay.freq_lo, constants.FREQ_TABLE_LEN))
+    freq_hi = list(img.window(lay.freq_hi, constants.FREQ_TABLE_LEN))
 
     return Song(
         load_addr=load,

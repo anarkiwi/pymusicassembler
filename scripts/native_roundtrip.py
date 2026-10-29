@@ -9,10 +9,11 @@ import argparse
 from collections import Counter
 from pathlib import Path
 
+from pysidtracker import load_prefix
+from pysidtracker.cli import address
 from tqdm import tqdm
 
 from pymusicassembler import native, reader, writer
-from pymusicassembler.cli import address
 from pymusicassembler.errors import MusicAssemblerError
 
 _MUSIC = (
@@ -32,7 +33,7 @@ def roundtrip(path, base=None):
         song = reader.parse(data)
     except MusicAssemblerError as exc:
         return "unread", type(exc).__name__
-    image = reader.load_prefix(song.load_addr) + writer.build(song)
+    image = load_prefix(song.load_addr) + writer.build(song)
     built = (
         "identical" if data in (image, song.container_header + image[2:]) else "differs"
     )
@@ -41,10 +42,10 @@ def roundtrip(path, base=None):
     except MusicAssemblerError:
         return built, "rejected"
     if base is not None:
-        again = reader.parse(reader.load_prefix(at) + body)
+        again = reader.parse(load_prefix(at) + body)
         same = all(getattr(again, f) == getattr(song, f) for f in _MUSIC)
         return built, "same_music" if same else "music_differs"
-    return built, "identical" if reader.load_prefix(at) + body == data else "differs"
+    return built, "identical" if load_prefix(at) + body == data else "differs"
 
 
 def main(argv=None):

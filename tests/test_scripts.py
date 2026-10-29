@@ -5,8 +5,12 @@ import json
 
 import layout_mismatch
 import native_roundtrip
+import snapshot_probes
 import survey_sample
-from pysidtracker import survey
+from pysidtracker import load_prefix, survey
+
+from pymusicassembler import cli, reader
+from pymusicassembler.formats import MUSIC_ASSEMBLER
 
 
 def _write(path, rows):
@@ -101,3 +105,17 @@ def test_layout_mismatch_names_the_differing_bytes(tmp_path, tune_path, capsys):
     patched.write_bytes(data.replace(bytes.fromhex("A200CE"), bytes.fromhex("A201CE")))
     layout_mismatch.main([str(patched)])
     assert "no play entry" in capsys.readouterr().out
+
+
+def test_snapshot_probes(native_tune_path, capsys):
+    """The relocated export rereads to the same music; the listing is the
+    ``grammar`` subcommand's output."""
+    tune = MUSIC_ASSEMBLER.load(native_tune_path.read_bytes())
+    body = snapshot_probes.relocated(tune)
+    again = reader.parse(load_prefix(snapshot_probes.RELOCATED_BASE) + body)
+    assert again.orderlists == tune.song.orderlists
+    assert again.patterns == tune.song.patterns
+    assert snapshot_probes.layout(tune) is tune.song.layout
+    assert cli.main(["grammar", str(native_tune_path)]) == 0
+    listing = capsys.readouterr().out.splitlines()
+    assert list(snapshot_probes.grammar(tune)) == listing

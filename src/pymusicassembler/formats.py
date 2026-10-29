@@ -2,7 +2,9 @@
 
 ``musicassembler`` on the ``pysidtracker.formats`` entry-point group plays tunes
 through :class:`~pymusicassembler.player.Player` for ``pysidtracker info|reglog|wav``
-and is the portable side spec ``format:musicassembler`` of ``pysidtracker.pathdiff``.
+and is the portable side spec ``format:musicassembler`` of ``pysidtracker.pathdiff``;
+its ``build`` and ``native`` probes are the rebuilt image and editor ``S.`` song
+``pysidtracker snapshot`` digests.
 """
 
 from __future__ import annotations
@@ -11,6 +13,7 @@ from typing import Iterable, NamedTuple, Optional, Sequence
 
 from pysidtracker import SidFormat
 
+from pymusicassembler import native, writer
 from pymusicassembler.model import Song
 from pymusicassembler.player import Player
 from pymusicassembler.reader import MusicAssemblerSidParser, parse
@@ -53,10 +56,19 @@ def _describe(tune: Tune) -> Iterable[str]:
     yield f"instruments: {len(song.instruments)}"
 
 
+def _build(tune: Tune) -> bytes:
+    return writer.build(tune.song)
+
+
+def _native(tune: Tune) -> bytes:
+    return native.assemble(tune.song)[1]
+
+
 MUSIC_ASSEMBLER = SidFormat(
     name="musicassembler",
     parser=MusicAssemblerTuneParser(),
     player=player,
     describe=_describe,
     metadata=_metadata,
+    probes={"build": _build, "native": _native},
 )

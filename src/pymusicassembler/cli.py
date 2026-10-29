@@ -4,7 +4,13 @@ import argparse
 import sys
 
 from pysidtracker.audio import seconds_to_frames
-from pysidtracker.cli import add_reglog_command, add_wav_command, run_cli
+from pysidtracker.cli import (
+    add_grammar_command,
+    add_reglog_command,
+    add_wav_command,
+    address,
+    run_cli,
+)
 
 from pymusicassembler import audio, constants, grammar, reglog, writer
 from pymusicassembler.errors import MusicAssemblerError
@@ -29,10 +35,8 @@ def _info(args) -> None:
 
 def _grammar(args) -> None:
     song = read(args.song, args.subtune)
-    for name, stream, rule in grammar.streams(song, song.layout):
-        print(f"{name}:")
-        for line in grammar.render(grammar.tree(stream.to_bytes(), rule)):
-            print(f"  {line}")
+    for line in grammar.GRAMMAR.listing(grammar.streams(song, song.layout)):
+        print(line)
 
 
 def _reglog(args) -> None:
@@ -57,11 +61,6 @@ def _resave(args) -> None:
     print(f"wrote {args.output}")
 
 
-def address(text: str) -> int:
-    """A C64 address argument: ``$C000``, ``0xC000`` or decimal."""
-    return int(text.replace("$", "0x"), 0)
-
-
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pymusicassembler", description="Music Assembler song tools"
@@ -72,12 +71,7 @@ def _parser() -> argparse.ArgumentParser:
     info.add_argument("song", help=_SONG_HELP)
     info.set_defaults(func=_info)
 
-    trees = commands.add_parser(
-        "grammar", help="print every orderlist, pattern and program parse tree"
-    )
-    trees.add_argument("song", help=_SONG_HELP)
-    trees.add_argument("--subtune", type=int, default=0, help="0-based subtune")
-    trees.set_defaults(func=_grammar)
+    add_grammar_command(commands, _grammar, song_help=_SONG_HELP)
 
     add_reglog_command(commands, _reglog, song_help=_SONG_HELP)
     add_wav_command(commands, _wav, song_help=_SONG_HELP)
