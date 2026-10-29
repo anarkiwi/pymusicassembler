@@ -9,9 +9,10 @@
 // Start rules suffixed with a build name accept that build's extra commands.
 
 // ---------------------------------------------------------------------------
-// Pattern: rows, one per duration countdown, until an $FF at a row start. The
-// player reads a row before testing for $FF, so for an empty pattern (a bare
-// $FF) it plays the $FF as a hold and walks on into the following bytes.
+// Pattern: rows until an $FF at a row start. Every row sets a duration d (its
+// byte & $1F) and lasts d + 1 tempo ticks. The player reads a row before
+// testing for $FF, so for an empty pattern (a bare $FF) it plays the $FF as a
+// hold and walks on into the following bytes.
 
 pattern: row* PATTERN_END _TAIL?
 
@@ -19,20 +20,21 @@ pattern: row* PATTERN_END _TAIL?
 
 // pitch (+ orderlist transpose) indexes the note-frequency tables; the control
 // byte's low five bits are the row's duration, bit 6 ties the note (no
-// instrument retrigger), bit 5 runs the vibrato in place of the instrument's
-// arpeggio. Bit 7 takes the filter to this voice (bit 5 then keeps the
-// previous vibrato steps).
+// instrument retrigger), bit 5 runs the vibrato and stops the instrument's
+// flag-$10 frequency sweep (a wave program still runs). Bit 7 takes the
+// filter sweep to this voice (bit 5 then keeps the previous vibrato steps).
 note: NOTE (plain | vibrato | filter)
 plain: CONTROL
 vibrato: CONTROL_VIBRATO BYTE BYTE  // frequency step lo, hi per frame
-filter: CONTROL_FILTER BYTE BYTE    // start cutoff (low nibble: sweep step),
-                                    // sweep length (0: no voice filtered)
+// cutoff the voice's trigger loads (low nibble n: sweep step 2n - 16), then
+// sweep length (frames; 0 keeps the previous length and routes no voice)
+filter: CONTROL_FILTER BYTE BYTE
 
-rest: REST    // gate off for (byte & $1F) rows
-hold: HOLD    // the sounding note continues for (byte & $1F) rows
+rest: REST    // gate off
+hold: HOLD    // the sounding note continues
 
-// an instrument select applies to the note it is followed by; any byte from
-// $60 is instead a rest (gate off for byte & $1F rows) under that instrument
+// an instrument select sets the voice's instrument from this row on; it is
+// followed by a note, or by any byte from $60 as a rest (gate off)
 select: INSTRUMENT (note | select_rest)
 select_rest: SELECT_REST
 
@@ -51,7 +53,7 @@ CONTROL_FILTER: /[\x80-\xff]/
 // orderlist step when a pattern's repeats run out. $FF loops to the build's
 // restart entry; a single $FE parks the voice on the silence pattern. The
 // order-hook build adds the $FD n jump to entry n, the later build also the
-// $FC t tempo reload.
+// $FC t tempo reload, applied before the step reads the next entry.
 
 orderlist: entry* order_end _TAIL?
 orderlist_hook: entry_hook* (order_end | jump) _TAIL?
@@ -76,10 +78,12 @@ ORDER_LOOP: /\xff/
 
 // ---------------------------------------------------------------------------
 // Arpeggio (wave) program, run each frame for an instrument whose flags' low
-// nibble selects it: (waveform, pitch, cutoff) rows. The pitch is relative to
-// the note (absolute from $80 on builds that test bit 7), the cutoff is
-// written when non-zero. A row-start $FF restarts the program, $FE stops it;
-// the later build's $FD r continues at row r.
+// nibble n selects slot n (n = 0 runs none): (waveform, pitch, cutoff) rows.
+// The pitch is relative to the note (absolute from $80 on builds that test
+// bit 7); a non-zero cutoff replaces the filter sweep's cutoff accumulator. A
+// row-start $FF restarts the program, $FE stops it; the later build's $FD r
+// continues at byte 3r, so r = 0 or r at least the marker's offset restarts
+// and r from the row count on runs into the bytes past the program.
 
 program: program_row* program_end _TAIL?
 program_jump: program_row_jump* (program_end | row_jump) _TAIL?

@@ -80,7 +80,7 @@ class NoteEvent:
 
     @property
     def duration(self) -> int:
-        """Rows the note lasts (the control byte's low five bits)."""
+        """The row's duration ``d`` (low five bits): it lasts ``d + 1`` tempo ticks."""
         return self.control & constants.CTL_DUR_MASK
 
     @property
@@ -90,7 +90,7 @@ class NoteEvent:
 
     @property
     def vibrato(self) -> bool:
-        """The vibrato runs in place of the instrument's arpeggio."""
+        """The vibrato runs and the instrument's flag-$10 sweep stops."""
         return bool(self.control & constants.CTL_VIBARP)
 
     @property
@@ -108,10 +108,10 @@ class InstrumentEvent:
 
 @dataclass(frozen=True)
 class DurationEvent:
-    """A bare/long duration token (sets the row's frame duration)."""
+    """A row of ``duration + 1`` tempo ticks: a rest (gate off) or a hold."""
 
     duration: int
-    long: bool = False  # True for the $A0-$FE long-duration form
+    long: bool = False  # True for a hold ($A0-$FE): the note sounds on
 
 
 PatternEvent = NoteEvent | InstrumentEvent | DurationEvent
