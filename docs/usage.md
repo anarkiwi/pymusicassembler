@@ -42,6 +42,7 @@ ma.write_presets(ma.read_presets("P.TUNE.p"), "P.COPY.p")
 ```bash
 pymusicassembler info   tune.sid
 pymusicassembler grammar tune.sid           # parse tree of every orderlist, pattern and program
+pysidtracker grammar tune.sid               # the same, from the format's grammar hooks
 pymusicassembler reglog tune.sid tune.reglog --seconds 30
 pymusicassembler wav    tune.sid tune.wav    --seconds 30 --model 8580
 pymusicassembler resave tune.sid out.sid     # round-trip write-back (see docs/format.md)
@@ -51,17 +52,17 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  #
 
 ## Corpus snapshots
 
-The `musicassembler` format registers `build` (the rebuilt image) and `native`
-(the `S.` export) probes for `pysidtracker snapshot`;
+The `musicassembler` format registers `build` (the rebuilt image), `native`
+(the `S.` export) and `grammar` (the stream listing) probes for
+`pysidtracker snapshot`;
 [`scripts/snapshot_probes.py`](../scripts/snapshot_probes.py) adds the
-relocated export, the discovered layout and the grammar listing. A refactor
+relocated export and the discovered layout. A refactor
 that changes nothing leaves `snapshot diff` empty:
 
 ```bash
 PYTHONPATH=scripts pysidtracker snapshot build .tunecache/DEMOS .tunecache/GAMES \
     .tunecache/MUSICIANS -o .snapshots/before.json --format musicassembler \
-    --probe relocated=snapshot_probes:relocated --probe layout=snapshot_probes:layout \
-    --probe grammar=snapshot_probes:grammar
+    --probe relocated=snapshot_probes:relocated --probe layout=snapshot_probes:layout
 pysidtracker snapshot diff .snapshots/before.json .snapshots/after.json
 ```
 

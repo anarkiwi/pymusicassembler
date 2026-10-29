@@ -29,7 +29,7 @@ jobs:
         # HVSC tunes and the editor P./S. files (csdb.dk release 94388, pinned in
         # tests/fixtures/ma_native.txt) are copyright and never committed;
         # pysidtracker's cache action pre-fetches and persists them.
-        uses: anarkiwi/pysidtracker/.github/actions/cache@v0.39.0
+        uses: anarkiwi/pysidtracker/.github/actions/cache@v0.40.0
         with:
           key: ${{ hashFiles('tests/fixtures/*.txt', 'tests/*.py') }}
           tunes: tests tests/fixtures/ma_corpus.txt
@@ -59,7 +59,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Cache tunes and oracle traces
-        uses: anarkiwi/pysidtracker/.github/actions/cache@v0.39.0
+        uses: anarkiwi/pysidtracker/.github/actions/cache@v0.40.0
         with:
           key: ${{ hashFiles('tests/test_oracle_*.py', 'tests/fixtures/pathdiff.json') }}
           sidtrace: "true"

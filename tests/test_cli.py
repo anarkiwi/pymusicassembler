@@ -2,6 +2,8 @@
 
 import pytest
 
+from pysidtracker import maincli
+
 from pymusicassembler import cli
 
 
@@ -69,3 +71,11 @@ def test_grammar(tune_path, capsys):
     assert "pattern 0:\n  pattern" in out
     assert "PATTERN_END=$ff" in out
     assert "ORDER_LOOP=$ff" in out or "SILENCE=$fe" in out or "ORDER_JUMP=$fd" in out
+
+
+def test_pysidtracker_grammar_uses_the_format_hooks(tune_path, capsys):
+    """``pysidtracker grammar`` prints the same listing from the format's hooks."""
+    assert cli.main(["grammar", str(tune_path)]) == 0
+    ours = capsys.readouterr().out
+    assert maincli.main(["grammar", str(tune_path), "--format", "musicassembler"]) == 0
+    assert capsys.readouterr().out == ours
