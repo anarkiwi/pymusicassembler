@@ -2,15 +2,14 @@
 
 Patterns, orderlists and arpeggio programs are the bytes the player's 8-bit
 cursors walk from their pointer tables, one character per byte (latin-1);
-:class:`ToModel` builds the typed model while the stream parses.
+:class:`ToModel` builds the typed model while the stream parses, under
+:data:`GRAMMAR`, a :class:`pysidtracker.bytegrammar.ByteGrammar`.
 """
 
-from functools import lru_cache
-from importlib import resources
-from typing import Iterator, List, NamedTuple, Tuple, Union
+from typing import Iterator, List, Tuple
 
-from lark import Lark, Token, Transformer, Tree, v_args
-from lark.exceptions import LarkError
+from lark import Token, Transformer, v_args
+from pysidtracker.bytegrammar import ByteGrammar, Parsed, select_rule
 
 from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerParseError, SongValidationError
@@ -23,8 +22,6 @@ from pymusicassembler.model import (
     OrderEntry,
     Orderlist,
 )
-
-REACH = 0x100  # the player indexes every stream with an 8-bit Y cursor
 
 PATTERN = "pattern"
 ORDERLIST = "orderlist"
@@ -42,84 +39,18 @@ COMMANDS = {
 }
 
 
-class Parsed(NamedTuple):
-    """A parsed stream: its model and the bytes it spans, terminator included."""
-
-    model: Union[list, Orderlist, Arpeggio]
-    size: int
-
-
-@lru_cache(maxsize=None)
-def parser(trees: bool = False) -> Lark:
-    """The LALR parser over every stream: :class:`Parsed` results, else trees."""
-    text = resources.files(__package__).joinpath("musicassembler.lark").read_text()
-    return Lark(
-        text,
-        parser="lalr",
-        lexer="contextual",
-        start=list(START),
-        transformer=None if trees else ToModel(),
-    )
-
-
 def orderlist_rule(lay) -> str:
     """The orderlist start rule of the build ``lay`` (a player Layout)."""
-    if lay.order_tempo:
-        return ORDERLIST_INLINE
-    return ORDERLIST_HOOK if lay.order_jump else ORDERLIST
+    return select_rule(
+        lay,
+        (("order_tempo", ORDERLIST_INLINE), ("order_jump", ORDERLIST_HOOK)),
+        ORDERLIST,
+    )
 
 
 def program_rule(lay) -> str:
     """The arpeggio-program start rule of the build ``lay``."""
-    return PROGRAM_JUMP if lay.program_jump else PROGRAM
-
-
-def _parse(data: bytes, rule: str, trees: bool = False):
-    try:
-        return parser(trees).parse(bytes(data).decode("latin-1"), start=rule)
-    except LarkError as exc:
-        raise MusicAssemblerParseError(
-            f"{rule} has no terminator within {len(data)} bytes"
-        ) from exc
-
-
-def parse_prefix(data: bytes, rule: str) -> Parsed:
-    """The ``rule`` stream at the start of ``data``; the rest is never read."""
-    return _parse(data, rule)
-
-
-def parse_exact(data: bytes, rule: str):
-    """The model of ``data``, which must be exactly one ``rule`` stream."""
-    model, size = _parse(data, rule)
-    if size != len(data):
-        raise MusicAssemblerParseError(
-            f"{rule} ends after {size} of its {len(data)} bytes"
-        )
-    return model
-
-
-def tree(data: bytes, rule: str) -> Tree:
-    """The parse tree of the ``rule`` stream at the start of ``data``."""
-    return _parse(data, rule, trees=True)
-
-
-def _byte(token: Token) -> str:
-    return f"{token.type}=${ord(token):02x}"
-
-
-def render(node: Tree, depth: int = 0) -> Iterator[str]:
-    """Indented lines of ``node`` in stream order; a rule holding only bytes
-    is one line of ``TERMINAL=$xx`` items."""
-    pad = "  " * depth
-    if not any(isinstance(child, Tree) for child in node.children):
-        yield " ".join([pad + node.data] + [_byte(tok) for tok in node.children])
-        return
-    yield pad + node.data
-    for child in node.children:
-        if isinstance(child, Tree):
-            yield from render(child, depth + 1)
-        else:
-            yield pad + "  " + _byte(child)
+    return select_rule(lay, (("program_jump", PROGRAM_JUMP),), PROGRAM)
 
 
 def streams(song, lay) -> Iterator[Tuple[str, object, str]]:
@@ -138,15 +69,7 @@ def streams(song, lay) -> Iterator[Tuple[str, object, str]]:
 def check(song, lay) -> None:
     """Raise :class:`SongValidationError` unless every stream of ``song``
     serializes to bytes the build ``lay`` reads back as the same stream."""
-    for name, stream, rule in streams(song, lay):
-        try:
-            back = parse_exact(stream.to_bytes(), rule)
-        except MusicAssemblerParseError as exc:
-            raise SongValidationError(
-                f"{name} is not one {rule} stream: {exc}"
-            ) from exc
-        if rule != PATTERN and back != stream:
-            raise SongValidationError(f"{name} reads back as {back}, not {stream}")
+    GRAMMAR.check(streams(song, lay), SongValidationError, skip_equality=(PATTERN,))
 
 
 def _dur(token: Token) -> int:
@@ -224,3 +147,8 @@ class ToModel(Transformer):
         return Parsed(model, len(model.to_bytes()))
 
     program_jump = program
+
+
+GRAMMAR = ByteGrammar(
+    __package__, "musicassembler.lark", START, ToModel(), MusicAssemblerParseError
+)

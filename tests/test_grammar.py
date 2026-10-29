@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from pysidtracker.bytegrammar import render
 
 from pymusicassembler import constants, grammar, reader
 from pymusicassembler.errors import MusicAssemblerParseError, SongValidationError
@@ -52,7 +53,7 @@ LATER = SimpleNamespace(order_tempo=0x1234, order_jump=0x1234, program_jump=0x12
 )
 def test_pattern_rows(data, events, size):
     """Each row kind decodes to its events and the pattern spans ``size`` bytes."""
-    assert grammar.parse_prefix(bytes(data) + b"\x10\x05", grammar.PATTERN) == (
+    assert grammar.GRAMMAR.parse_prefix(bytes(data) + b"\x10\x05", grammar.PATTERN) == (
         events,
         size,
     )
@@ -60,7 +61,9 @@ def test_pattern_rows(data, events, size):
 
 def test_pattern_ends_at_the_first_row_start_ff():
     """Bytes after the row-start $FF are another stream's."""
-    parsed = grammar.parse_prefix(bytes((0x63, 0xFF, 0x10, 0x05, 0xFF)), "pattern")
+    parsed = grammar.GRAMMAR.parse_prefix(
+        bytes((0x63, 0xFF, 0x10, 0x05, 0xFF)), "pattern"
+    )
     assert parsed == ([DurationEvent(3)], 2)
 
 
@@ -70,12 +73,12 @@ def test_pattern_ends_at_the_first_row_start_ff():
 def test_unterminated_pattern_is_rejected(data):
     """A $FF read as a control byte, argument or select rest ends no pattern."""
     with pytest.raises(MusicAssemblerParseError, match="no terminator within"):
-        grammar.parse_prefix(bytes(data), grammar.PATTERN)
+        grammar.GRAMMAR.parse_prefix(bytes(data), grammar.PATTERN)
 
 
 def test_orderlist_takes_fc_and_fd_as_pattern_ids():
     """The original build plays $FC and $FD as patterns; only $FF/$FE end it."""
-    model, size = grammar.parse_prefix(
+    model, size = grammar.GRAMMAR.parse_prefix(
         bytes((0xFC, 0x00, 0xFD, 0x12, 0xFF, 0x07)), grammar.ORDERLIST
     )
     assert [e.pattern_id for e in model.entries] == [0xFC, 0xFD]
@@ -86,7 +89,7 @@ def test_orderlist_takes_fc_and_fd_as_pattern_ids():
 
 def test_orderlist_hook_ends_on_a_jump():
     """The hook build's $FD n ends the list; $FC is still a pattern id."""
-    model, size = grammar.parse_prefix(
+    model, size = grammar.GRAMMAR.parse_prefix(
         bytes((0xFC, 0x00, 0xFD, 0x03, 0x01, 0x00, 0xFF)), grammar.ORDERLIST_HOOK
     )
     assert model.terminator == constants.ORDER_JUMP
@@ -97,7 +100,7 @@ def test_orderlist_hook_ends_on_a_jump():
 
 def test_orderlist_inline_tempo_continues_the_list():
     """The later build's $FC t is an entry; the list goes on to its terminator."""
-    model, size = grammar.parse_prefix(
+    model, size = grammar.GRAMMAR.parse_prefix(
         bytes((0xFC, 0x06, 0x01, 0x20, 0xFD, 0x01, 0x02)), grammar.ORDERLIST_INLINE
     )
     assert [(e.pattern_id, e.control_byte()) for e in model.entries] == [
@@ -112,7 +115,9 @@ def test_orderlist_inline_tempo_continues_the_list():
 @pytest.mark.parametrize("rule", grammar.START[1:4])
 def test_silence_is_one_byte(rule):
     """$FE parks the voice: the next voice's bytes are not part of the list."""
-    model, size = grammar.parse_prefix(bytes((0x01, 0x00, 0xFE, 0x35, 0x00)), rule)
+    model, size = grammar.GRAMMAR.parse_prefix(
+        bytes((0x01, 0x00, 0xFE, 0x35, 0x00)), rule
+    )
     assert model == Orderlist(
         [OrderEntry(1), OrderEntry(constants.SILENCE_PATTERN)],
         constants.SILENCE_PATTERN,
@@ -122,7 +127,7 @@ def test_silence_is_one_byte(rule):
 
 def test_program_reads_fd_as_wave():
     """Without the jump command $FD is a row's waveform byte."""
-    model, size = grammar.parse_prefix(
+    model, size = grammar.GRAMMAR.parse_prefix(
         bytes((0xFD, 0x10, 0x00, 0xFF, 0x41)), grammar.PROGRAM
     )
     assert model == Arpeggio([ArpeggioRow(0xFD, 0x10, 0x00)])
@@ -131,7 +136,7 @@ def test_program_reads_fd_as_wave():
 
 def test_program_jump_ends_on_fd():
     """The later build's row-start $FD r continues at row r."""
-    model, size = grammar.parse_prefix(
+    model, size = grammar.GRAMMAR.parse_prefix(
         bytes((0x41, 0xFF, 0xFE, 0xFD, 0x00, 0x11)), grammar.PROGRAM_JUMP
     )
     assert model == Arpeggio(
@@ -142,23 +147,23 @@ def test_program_jump_ends_on_fd():
 
 @pytest.mark.parametrize("rule", (grammar.PROGRAM, grammar.PROGRAM_JUMP))
 def test_program_stops_on_fe(rule):
-    model, size = grammar.parse_prefix(bytes((0x41, 0, 0, 0xFE, 0x99)), rule)
+    model, size = grammar.GRAMMAR.parse_prefix(bytes((0x41, 0, 0, 0xFE, 0x99)), rule)
     assert model.terminator == constants.PROGRAM_STOP
     assert size == 4
 
 
 def test_parse_exact_rejects_trailing_bytes():
     with pytest.raises(MusicAssemblerParseError, match="ends after 3 of its 4 bytes"):
-        grammar.parse_exact(bytes((0x01, 0x00, 0xFF, 0x00)), grammar.ORDERLIST)
+        grammar.GRAMMAR.parse_exact(bytes((0x01, 0x00, 0xFF, 0x00)), grammar.ORDERLIST)
 
 
 def test_parse_exact_rejects_unterminated_input():
     with pytest.raises(MusicAssemblerParseError, match="no terminator within 2"):
-        grammar.parse_exact(bytes((0x01, 0x00)), grammar.ORDERLIST)
+        grammar.GRAMMAR.parse_exact(bytes((0x01, 0x00)), grammar.ORDERLIST)
 
 
 def test_parse_exact_returns_the_model():
-    assert grammar.parse_exact(bytes((0x41, 0, 0, 0xFF)), grammar.PROGRAM) == (
+    assert grammar.GRAMMAR.parse_exact(bytes((0x41, 0, 0, 0xFF)), grammar.PROGRAM) == (
         Arpeggio([ArpeggioRow(0x41, 0, 0)])
     )
 
@@ -166,7 +171,7 @@ def test_parse_exact_returns_the_model():
 def test_render_follows_stream_order():
     """Rules nest by indent; tokens appear in byte order with their terminal."""
     data = bytes((0x82, 0x10, 0x05, 0x63, 0x18, 0x83, 0x4F, 0xFF, 0xFF, 0x00))
-    assert list(grammar.render(grammar.tree(data, grammar.PATTERN))) == [
+    assert list(render(grammar.GRAMMAR.tree(data, grammar.PATTERN))) == [
         "pattern",
         "  select",
         "    INSTRUMENT=$82",
@@ -194,7 +199,7 @@ def test_render_follows_stream_order():
     ],
 )
 def test_render_bytes_only_rule_on_one_line(data, rule, lines):
-    assert list(grammar.render(grammar.tree(bytes(data), rule))) == lines
+    assert list(render(grammar.GRAMMAR.tree(bytes(data), rule))) == lines
 
 
 @pytest.mark.parametrize(

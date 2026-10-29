@@ -5,13 +5,13 @@ import pytest
 from pymusicassembler import constants, native, player, reader, writer
 from pymusicassembler.errors import SongValidationError
 from pymusicassembler.model import Arpeggio, ArpeggioRow, OrderEntry, Pattern
-from pysidtracker import SidImage
+from pysidtracker import load_prefix
 
 EDITOR_ORDER = ("space", "7years")  # sources already in the editor's table order
 
 
 def _reread(base, body):
-    return reader.parse(reader.load_prefix(base) + body)
+    return reader.parse(load_prefix(base) + body)
 
 
 def _layout(song):
@@ -125,7 +125,7 @@ def test_native_keeps_editor_files_byte_identical(native_tune_path, tmp_path):
     """A PSID-wrapped editor song exports back to its image byte-for-byte."""
     song = reader.read(native_tune_path)
     out = writer.write(song, tmp_path / "song.prg", container="native")
-    expected = reader.load_prefix(song.load_addr) + song.image
+    expected = load_prefix(song.load_addr) + song.image
     assert out.read_bytes() == expected
 
 
@@ -135,7 +135,7 @@ def test_build_native_matches_write(tune_path, tmp_path):
     base, body = native.assemble(song, 0x4000)
     assert writer.build_native(song, 0x4000) == body
     out = writer.write(song, tmp_path / "song.prg", container="native", base=0x4000)
-    assert out.read_bytes() == reader.load_prefix(base) + body
+    assert out.read_bytes() == load_prefix(base) + body
 
 
 def test_native_places_edits(tune_path):
@@ -215,7 +215,7 @@ def test_native_rejects_operand_into_unplaced_data(tune_path, monkeypatch):
 
     def with_stray(image, *args):
         code = real(image, *args)
-        image.mem[lay.entry + 1 : lay.entry + 3] = reader.load_prefix(stray)
+        image.mem[lay.entry + 1 : lay.entry + 3] = load_prefix(stray)
         return {**code, lay.entry: 3}
 
     monkeypatch.setattr(native, "walk_code", with_stray)
@@ -234,40 +234,6 @@ def test_order_hook_build_exports_in_editor_order(tune):
     _assert_same_music(out, song)
     _, lay = _layout(out)
     assert lay.order_jump and lay.pattern_hi < lay.pattern_lo < lay.instr
-
-
-def _image(code: bytes, at: int = 0x1000) -> SidImage:
-    return SidImage.from_prg(reader.load_prefix(at) + code)
-
-
-@pytest.mark.parametrize(
-    "code,expected",
-    [
-        # JSR $1006; RTS; data; LDA $1234; RTS
-        (
-            bytes.fromhex("200610600000ad341260"),
-            {0x1000: 3, 0x1003: 1, 0x1006: 3, 0x1009: 1},
-        ),
-        # CLC; BCC +1 is taken, so the JAM after it is never walked.
-        (bytes.fromhex("18900102ea60"), {0x1000: 1, 0x1001: 2, 0x1004: 1, 0x1005: 1}),
-        # BNE +1 falls through into a JAM, which ends that path only.
-        (bytes.fromhex("d00102ea60"), {0x1000: 2, 0x1002: 1, 0x1003: 1, 0x1004: 1}),
-        # JMP $1005 skips data; the target RTS ends the path.
-        (bytes.fromhex("4c0510ffff60"), {0x1000: 3, 0x1005: 1}),
-    ],
-)
-def test_walk_code_follows_control_flow(code, expected):
-    end = 0x1000 + len(code)
-    assert native.walk_code(_image(code), [0x1000], 0x1000, end) == expected
-
-
-def test_walk_code_stays_in_range():
-    """Targets outside [lo, hi) are not walked."""
-    code = bytes.fromhex("20ffcf60")  # JSR $CFFF; RTS
-    assert native.walk_code(_image(code), [0x1000], 0x1000, 0x1004) == {
-        0x1000: 3,
-        0x1003: 1,
-    }
 
 
 def test_native_keeps_unread_patterns_unread(tune):

@@ -20,10 +20,11 @@ emits the editor's ``S.`` song (``container="native"``), which
 from pathlib import Path
 from typing import Optional
 
-from pysidtracker import SidError, SidImage, write_psid
+from pysidtracker import SidError, SidImage, load_prefix, require_ram, write_psid
+from pysidtracker.errors import reraise_as
 
 from pymusicassembler import constants, grammar, native, reader
-from pymusicassembler.errors import SongValidationError, unwritable
+from pymusicassembler.errors import MusicAssemblerParseError, SongValidationError
 from pymusicassembler.model import PresetBank, Song
 
 
@@ -33,25 +34,21 @@ def _put(image: SidImage, addr: int, values) -> None:
     Writes past the current end grow the image; a write before the base is
     a corrupt pointer and raises :class:`SongValidationError`.
     """
-    try:
+    with reraise_as(SongValidationError, SidError):
         image.poke_bytes(addr, bytes(v & 0xFF for v in values))
-    except SidError as exc:
-        raise SongValidationError(str(exc)) from exc
 
 
 def _put_ptr(image: SidImage, lo: int, hi: int, index: int, addr: int) -> None:
-    """Point entry ``index`` of the split ``lo``/``hi`` pointer table at ``addr``."""
-    _put(image, lo + index, (addr,))
-    _put(image, hi + index, (addr >> 8,))
+    """:meth:`SidImage.put_ptr`, raising :class:`SongValidationError` (see :func:`_put`)."""
+    with reraise_as(SongValidationError, SidError):
+        image.put_ptr(lo, hi, index, addr)
 
 
 def validate(song: Song) -> None:
     """Raise :class:`SongValidationError` if ``song`` cannot be emitted."""
     if not song.image:
         raise SongValidationError("song has no base image to re-emit into")
-    reader.require_ram(
-        song.load_addr, len(song.image), "song image", SongValidationError
-    )
+    require_ram(song.load_addr, len(song.image), "song image", SongValidationError)
     if len(song.orderlists) != constants.VOICES:
         raise SongValidationError(
             f"expected {constants.VOICES} orderlists, got {len(song.orderlists)}"
@@ -133,7 +130,7 @@ def build(song: Song) -> bytes:
     load = song.load_addr
     region = range(load, load + len(song.image))
     image = reader.load_view(song.image, load)
-    with unwritable():
+    with reraise_as(SongValidationError, MusicAssemblerParseError):
         lay = reader.discover_layout(image, load, region.start, region.stop)
     grammar.check(song, lay)
 
@@ -184,14 +181,14 @@ def write(song: Song, dst, container: str = "auto", base: Optional[int] = None) 
     if container == "native":
         validate(song)
         base, body = native.assemble(song, base)
-        blob = reader.load_prefix(base) + body
+        blob = load_prefix(base) + body
         Path(dst).write_bytes(blob)
         return Path(dst)
     image = build(song)
     if container == "auto" and song.container_header:
         blob = song.container_header + image
     elif container == "prg":
-        blob = reader.load_prefix(song.load_addr) + image
+        blob = load_prefix(song.load_addr) + image
     elif container in ("psid", "auto"):
         blob = _wrap_psid(song, image)
     else:
@@ -220,7 +217,5 @@ def build_presets(bank: PresetBank) -> bytes:
 
 def write_presets(bank: PresetBank, dst) -> Path:
     """Write ``bank`` as the editor's ``P.`` file: load ``$4300`` + body."""
-    Path(dst).write_bytes(
-        reader.load_prefix(constants.PRESET_BANK_LOAD) + build_presets(bank)
-    )
+    Path(dst).write_bytes(load_prefix(constants.PRESET_BANK_LOAD) + build_presets(bank))
     return Path(dst)

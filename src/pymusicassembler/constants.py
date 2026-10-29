@@ -83,9 +83,6 @@ PROGRAM_RESTART = 0xFF  # restart: the program loops to its first row
 # Fixed table sizes the reader extracts.
 FREQ_TABLE_LEN = 96  # note frequency table entries
 
-# C64 I/O area: $D000-$DFFF holds the CIA/SID/VIC chips while the player runs ($01=$35-$37); a KERNAL LOAD stores into them, not RAM.
-IO_AREA = (0xD000, 0xE000)
-
 # C64 timing. A PAL frame is 312 rasterlines x 63 cycles.
 PAL_CLOCK_HZ = _reg.PAL_CLOCK_HZ
 PAL_CYCLES_PER_FRAME = _reg.PAL_CYCLES_PER_FRAME

@@ -236,3 +236,6 @@ __marimo__/
 # process core dumps
 core.[0-9]*
 /core
+
+# pysidtracker snapshot JSONs (snapshot build -o .snapshots/...).
+.snapshots/

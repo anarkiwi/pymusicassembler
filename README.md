@@ -10,7 +10,8 @@ native editor formats of every editor version: the `S.` song export and the
 
 Patterns, orderlists and arpeggio programs are read, checked and printed with a
 Music Assembler [Lark](https://github.com/lark-parser/lark) grammar of what the
-player reads ([docs/format.md](docs/format.md#song-grammar)).
+player reads, run by `pysidtracker`'s byte-grammar runtime
+([docs/format.md](docs/format.md#song-grammar)).
 
 Consumes `.sid` files (PSID/RSID containers) and bare `.prg` images through the
 shared [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) base: every

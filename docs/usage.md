@@ -49,6 +49,22 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native  # editor song
 pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  # relocated
 ```
 
+## Corpus snapshots
+
+The `musicassembler` format registers `build` (the rebuilt image) and `native`
+(the `S.` export) probes for `pysidtracker snapshot`;
+[`scripts/snapshot_probes.py`](../scripts/snapshot_probes.py) adds the
+relocated export, the discovered layout and the grammar listing. A refactor
+that changes nothing leaves `snapshot diff` empty:
+
+```bash
+PYTHONPATH=scripts pysidtracker snapshot build .tunecache/DEMOS .tunecache/GAMES \
+    .tunecache/MUSICIANS -o .snapshots/before.json --format musicassembler \
+    --probe relocated=snapshot_probes:relocated --probe layout=snapshot_probes:layout \
+    --probe grammar=snapshot_probes:grammar
+pysidtracker snapshot diff .snapshots/before.json .snapshots/after.json
+```
+
 ## Public API
 
 - `read(src, subtune=0) -> Song` / `parse(bytes, subtune=0) -> Song` — read a
@@ -73,11 +89,12 @@ pymusicassembler resave tune.sid S.TUNE.prg --container native --base '$C000'  #
   with play address 0 plays every interrupt its init installs (raster, CIA
   IRQs, NMI digis, a main loop) on `pysidtracker.irqhost.InterruptPlayer`,
   one frame per play-source raise as the oracle frames it.
-- `grammar` — the [song grammar](format.md#song-grammar):
-  `parse_prefix(data, rule) -> Parsed(model, size)` / `parse_exact(data, rule)`
-  (a pattern's events, an `Orderlist`, an `Arpeggio`), `tree(data, rule)` and
-  `render(tree)`, `orderlist_rule(layout)` / `program_rule(layout)` (the
-  build's start rule), `streams(song, layout)` and `check(song, layout)`.
+- `grammar` — the [song grammar](format.md#song-grammar): `GRAMMAR`, a
+  `pysidtracker.bytegrammar.ByteGrammar` (`parse_prefix(data, rule) ->
+  Parsed(model, size)`, `parse_exact`, `tree`, `read`/`entry`/`stored` from an
+  image, `listing`; models are a pattern's events, an `Orderlist`, an
+  `Arpeggio`), `orderlist_rule(layout)` / `program_rule(layout)` (the build's
+  start rule), `streams(song, layout)` and `check(song, layout)`.
 - `formats.MUSIC_ASSEMBLER` — the `musicassembler` `pysidtracker.SidFormat`
   (entry point `pysidtracker.formats`), so `pysidtracker info|reglog|wav` play
   Music Assembler tunes and `format:musicassembler` names this player in

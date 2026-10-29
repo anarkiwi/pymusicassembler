@@ -103,8 +103,9 @@ save from the model, relocated to `base` (default: the source's player base,
 | data | patterns, orderlists (voice 3 first), arpeggio programs, `pattern_hi`, `pattern_lo` (each with a closing zero entry), presets |
 
 - Player operands are relocated by walking the player's control flow from its
-  play and init entries (`JSR`/`JMP`/branch targets; `CLC; BCC`-style forced
-  branches; `RTS`/`RTI`/`BRK`/`JMP ()`/`JAM` end a path); operands into the
+  play and init entries with `pysidtracker.relocate.walk_code` (`JSR`/`JMP`/
+  branch targets; `CLC; BCC`-style forced branches; `RTS`/`RTI`/`BRK`/`JMP ()`/
+  `JAM` end a path) and retargeted by `relocate_operands`; operands into the
   player move with `base`, operands at `pattern_lo`, `pattern_hi` and the
   presets follow their tables, and an operand into other song data raises
   `SongValidationError`.
@@ -160,7 +161,9 @@ same orderlists and patterns play with the bank's presets.
 ## Song grammar
 
 The song data the play routine walks is described by one Lark grammar,
-[`musicassembler.lark`](../src/pymusicassembler/musicassembler.lark). Each
+[`musicassembler.lark`](../src/pymusicassembler/musicassembler.lark), loaded as
+`grammar.GRAMMAR`, a `pysidtracker.bytegrammar.ByteGrammar` (its `BYTE` and
+`_TAIL` terminals are pysidtracker's shared `bytes` fragment). Each
 stream is the run of bytes one of the player's 8-bit cursors reads from a
 pointer-table entry, at most `$100` bytes, one grammar character per byte.
 Rules are named for what the player does with the bytes. Start rules select
@@ -313,7 +316,8 @@ oracle comparison works.
 - [Multi Voice Assembler](https://csdb.dk/release/?id=140932) (R. Christer) —
   an unrelated program also credited as "Music Assembler".
 - [Lark](https://github.com/lark-parser/lark) — the parser the song grammar
-  runs on.
+  runs on, through `pysidtracker.bytegrammar` (see pysidtracker's
+  `docs/bytegrammar.md`).
 - [`sidtrace`](https://github.com/anarkiwi/sidtrace) — the `sidplayfp` register
   oracle the player is validated against.
 - [pyresidfp](https://pypi.org/project/pyresidfp/) — reSIDfp SID emulation

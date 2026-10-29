@@ -6,19 +6,17 @@ last non-zero byte; relocating moves the player's operands and pointers too.
 """
 
 import struct
-from typing import Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from pysidtracker import OP_LEN, SidImage
+from pysidtracker import SidImage, require_ram
+from pysidtracker.errors import reraise_as
+from pysidtracker.relocate import relocate_operands, walk_code
 
 from pymusicassembler import constants, grammar, reader
-from pymusicassembler.errors import SongValidationError, unwritable
-from pymusicassembler.layout import JMP_ABS, JSR_ABS, Layout
+from pymusicassembler.errors import MusicAssemblerParseError, SongValidationError
+from pymusicassembler.layout import Layout
 from pymusicassembler.model import Song
 
-_BRANCHES = frozenset((0x10, 0x30, 0x50, 0x70, 0x90, 0xB0, 0xD0, 0xF0))
-_JAMS = frozenset(range(0x02, 0x100, 0x10)) - {0x82, 0xA2, 0xC2, 0xE2}
-_STOPS = frozenset((0x00, 0x40, 0x60, JMP_ABS, 0x6C)) | _JAMS
-_FORCED = {0x90: 0x18, 0xB0: 0x38, 0x50: 0xB8}  # BCC after CLC, BCS/SEC, BVC/CLV
 _NO_ADDR = 0x10000
 
 NATIVE_STUB = bytes.fromhex(
@@ -40,35 +38,6 @@ def native_stub(base: int) -> bytes:
     return bytes(stub)
 
 
-def walk_code(
-    image: SidImage, starts: Iterable[int], lo: int, hi: int
-) -> Dict[int, int]:
-    """``{address: length}`` of each instruction the code at ``starts`` reaches in ``[lo, hi)``.
-
-    Recursive descent: ``JSR`` and branch targets are queued, ``JMP`` and a
-    branch its flag-setting predecessor forces continue at the target, and
-    ``RTS``/``RTI``/``BRK``/``JMP ()``/``JAM`` end a path.
-    """
-    code: Dict[int, int] = {}
-    todo = list(starts)
-    while todo:
-        pc, last = todo.pop(), None
-        while lo <= pc < hi and pc not in code:
-            op = image.peek(pc)
-            code[pc] = OP_LEN[op]
-            if op in (JSR_ABS, JMP_ABS):
-                todo.append(image.word(pc + 1))
-            elif op in _BRANCHES:
-                offset = image.peek(pc + 1)
-                todo.append(pc + 2 + offset - ((offset & 0x80) << 1))
-                if last is not None and _FORCED.get(op) == last:
-                    break
-            if op in _STOPS:
-                break
-            pc, last = pc + OP_LEN[op], op
-    return code
-
-
 def _source(song: Song) -> Tuple[SidImage, Layout, int]:
     """``(view, layout, base)`` of the source image; raises unless it is the editor player."""
     load = song.load_addr
@@ -79,7 +48,7 @@ def _source(song: Song) -> Tuple[SidImage, Layout, int]:
             "player is not at the editor's layout (no play entry at base+$21, as "
             "in later or relocated-copy builds); cannot emit the S. format"
         )
-    with unwritable():
+    with reraise_as(SongValidationError, MusicAssemblerParseError):
         lay = reader.discover_layout(
             view, base + constants.NATIVE_PLAY_OFFSET, load, load + len(song.image)
         )
@@ -289,23 +258,16 @@ def assemble(song: Song, base: Optional[int] = None) -> Tuple[int, bytes]:
 
     remap = {lay.pattern_lo: pattern_lo, lay.pattern_hi: pattern_hi}
     remap.update((lay.instr + k, instr + k) for k in range(constants.INSTR_RECORD_SIZE))
-    for operand in sorted(pc + 1 for pc, size in code.items() if size == 3):
-        target = view.word(operand)
-        if src <= target < tmpl_end:
-            target += base - src
-        elif target in remap:
-            target = remap[target]
-        elif target in region:
-            raise SongValidationError(
-                f"player operand at {operand:#06x} reaches {target:#06x}, song data "
-                "the editor layout does not place"
-            )
-        put(operand, struct.pack("<H", target & 0xFFFF))
+    moves = relocate_operands(
+        view, code, range(src, tmpl_end), base - src, remap, region, SongValidationError
+    )
+    for operand, target in moves.items():
+        put(operand, struct.pack("<H", target))
 
     body = bytes(tmpl + data)
     if base + len(body) > 0x10000:
         raise SongValidationError(
             f"native song [{base:#06x},{base + len(body):#06x}) runs past $FFFF"
         )
-    reader.require_ram(base, len(body), "native song", SongValidationError)
+    require_ram(base, len(body), "native song", SongValidationError)
     return base, body
