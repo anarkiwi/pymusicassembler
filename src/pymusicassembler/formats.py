@@ -3,8 +3,9 @@
 ``musicassembler`` on the ``pysidtracker.formats`` entry-point group plays tunes
 through :class:`~pymusicassembler.player.Player` for ``pysidtracker info|reglog|wav``
 and is the portable side spec ``format:musicassembler`` of ``pysidtracker.pathdiff``;
-its ``build`` and ``native`` probes are the rebuilt image and editor ``S.`` song
-``pysidtracker snapshot`` digests.
+its ``build``, ``native`` and ``grammar`` probes are the rebuilt image, editor
+``S.`` song and stream listing ``pysidtracker snapshot`` digests, and its
+``grammar``/``streams`` hooks back ``pysidtracker grammar``.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Iterable, NamedTuple, Optional, Sequence
 
 from pysidtracker import SidFormat
 
-from pymusicassembler import native, writer
+from pymusicassembler import grammar, native, writer
 from pymusicassembler.model import Song
 from pymusicassembler.player import Player
 from pymusicassembler.reader import MusicAssemblerSidParser, parse
@@ -64,11 +65,21 @@ def _native(tune: Tune) -> bytes:
     return native.assemble(tune.song)[1]
 
 
+def _streams(tune: Tune):
+    return grammar.streams(tune.song, tune.song.layout)
+
+
+def _listing(tune: Tune) -> tuple:
+    return tuple(MUSIC_ASSEMBLER.listing(tune))
+
+
 MUSIC_ASSEMBLER = SidFormat(
     name="musicassembler",
     parser=MusicAssemblerTuneParser(),
     player=player,
     describe=_describe,
     metadata=_metadata,
-    probes={"build": _build, "native": _native},
+    probes={"build": _build, "native": _native, "grammar": _listing},
+    grammar=grammar.GRAMMAR,
+    streams=_streams,
 )

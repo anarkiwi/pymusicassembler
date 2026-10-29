@@ -12,8 +12,9 @@ from pysidtracker.cli import (
     run_cli,
 )
 
-from pymusicassembler import audio, constants, grammar, reglog, writer
+from pymusicassembler import audio, constants, reglog, writer
 from pymusicassembler.errors import MusicAssemblerError
+from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
 from pymusicassembler.reader import read
 
 _SONG_HELP = "Music Assembler .sid/.prg file"
@@ -34,8 +35,7 @@ def _info(args) -> None:
 
 
 def _grammar(args) -> None:
-    song = read(args.song, args.subtune)
-    for line in grammar.GRAMMAR.listing(grammar.streams(song, song.layout)):
+    for line in MUSIC_ASSEMBLER.listing(Tune(read(args.song, args.subtune))):
         print(line)
 
 

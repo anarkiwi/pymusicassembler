@@ -59,10 +59,12 @@ def test_snapshot_probes_digest_build_and_native(native_tune_path, jump_tune_pat
     ``$FD`` program cannot be exported, which the native digest records."""
     data = native_tune_path.read_bytes()
     image = MUSIC_ASSEMBLER.load(data).song.image
+    tune = MUSIC_ASSEMBLER.load(data)
     assert fingerprint(data, MUSIC_ASSEMBLER) == {
-        "model": digest(MUSIC_ASSEMBLER.load(data)),
+        "model": digest(tune),
         "build": digest(image),
         "native": digest(image),
+        "grammar": digest(tuple(MUSIC_ASSEMBLER.listing(tune))),
     }
     native = fingerprint(jump_tune_path.read_bytes(), MUSIC_ASSEMBLER)["native"]
     assert native.startswith("!SongValidationError:")
