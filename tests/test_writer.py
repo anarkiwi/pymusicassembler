@@ -16,9 +16,7 @@ def test_build_is_image_stable(tune_path):
 def test_read_write_song_is_idempotent(tune_path):
     """read(write(song)) == song structurally."""
     song = reader.read(tune_path)
-    rebuilt = reader.parse(
-        bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + writer.build(song)
-    )
+    rebuilt = reader.parse(reader.load_prefix(song.load_addr) + writer.build(song))
     assert rebuilt.orderlists == song.orderlists
     assert rebuilt.patterns == song.patterns
     assert rebuilt.instruments == song.instruments
@@ -40,7 +38,7 @@ def test_write_prg(tune_path, tmp_path):
     song = reader.read(tune_path)
     out = writer.write(song, tmp_path / "out.prg", container="prg")
     blob = out.read_bytes()
-    assert blob[:2] == bytes((song.load_addr & 0xFF, song.load_addr >> 8))
+    assert blob[:2] == reader.load_prefix(song.load_addr)
     assert reader.parse(blob).image == song.image
 
 
@@ -122,7 +120,7 @@ def test_silence_terminator_round_trips_byte_exact(silence_tune_path):
     assert any(ol.terminator == constants.SILENCE_PATTERN for ol in song.orderlists)
     built = writer.build(song)
     assert built == song.image
-    prg = bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + built
+    prg = reader.load_prefix(song.load_addr) + built
     assert reader.parse(prg).orderlists == song.orderlists
 
 
@@ -132,7 +130,7 @@ def test_jump_terminator_round_trips_byte_exact(jump_tune_path):
     assert any(ol.terminator == constants.ORDER_JUMP for ol in song.orderlists)
     built = writer.build(song)
     assert built == song.image
-    prg = bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + built
+    prg = reader.load_prefix(song.load_addr) + built
     assert reader.parse(prg).orderlists == song.orderlists
 
 
@@ -144,7 +142,7 @@ def test_arpeggio_edit_within_reserved_region(tune_path):
     song.inner_programs[first].rows += [ArpeggioRow(0x21, 3, 0)]
     song.inner_programs[second].rows = song.inner_programs[second].rows[:1]
     built = writer.build(song)
-    reparsed = reader.parse(bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + built)
+    reparsed = reader.parse(reader.load_prefix(song.load_addr) + built)
     assert reparsed.inner_programs == song.inner_programs
     assert reparsed.orderlists == song.orderlists
     assert reparsed.patterns == song.patterns
@@ -166,7 +164,7 @@ def test_added_arpeggio_goes_past_image_end(tune_path):
     song.inner_programs[slot] = Arpeggio(rows=[ArpeggioRow(0x41, 0, 0)])
     built = writer.build(song)
     assert len(built) == len(song.image) + 4
-    reparsed = reader.parse(bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + built)
+    reparsed = reader.parse(reader.load_prefix(song.load_addr) + built)
     assert reparsed.inner_programs == song.inner_programs
     assert reparsed.instruments == song.instruments
 

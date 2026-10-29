@@ -1,6 +1,6 @@
 """Typed models: the Music Assembler song and the editor's P. preset bank."""
 
-from dataclasses import dataclass, field
+from dataclasses import astuple, dataclass, field
 from typing import Any, List, Optional
 
 from pymusicassembler import constants
@@ -157,25 +157,14 @@ class Instrument:
     porta: int = 0
 
     def to_bytes(self) -> bytes:
-        """The 8 on-disk record bytes."""
-        return bytes(
-            (
-                self.attack_decay & 0xFF,
-                self.sustain_release & 0xFF,
-                self.waveform & 0xFF,
-                self.pulse_init & 0xFF,
-                self.pulse_step & 0xFF,
-                self.arp_speed & 0xFF,
-                self.arp_step & 0xFF,
-                self.porta & 0xFF,
-            )
-        )
+        """The 8 on-disk record bytes, in field order."""
+        return bytes(v & 0xFF for v in astuple(self))
 
     @classmethod
     def from_bytes(cls, raw) -> "Instrument":
-        """Decode an 8-byte record."""
-        b = list(raw) + [0] * (8 - len(raw))
-        return cls(b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7])
+        """Decode a record; missing trailing bytes read as zero."""
+        size = constants.INSTR_RECORD_SIZE
+        return cls(*bytes(raw)[:size].ljust(size, b"\0"))
 
 
 @dataclass(frozen=True)

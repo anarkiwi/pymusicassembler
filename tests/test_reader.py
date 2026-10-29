@@ -1,6 +1,7 @@
 """Reader: container parsing and per-tune table discovery."""
 
 import io
+from types import SimpleNamespace
 
 import pytest
 
@@ -66,7 +67,7 @@ def test_control_bytes_add_no_instruments(tune_path):
     song = read(tune_path)
     count = len(song.instruments)
     song.patterns[0] = Pattern(song.patterns[0].data + [0x24, 0x9F, 0x97, 0x2E])
-    prefix = bytes((song.load_addr & 0xFF, song.load_addr >> 8))
+    prefix = reader.load_prefix(song.load_addr)
     assert len(parse(prefix + writer.build(song)).instruments) == count
 
 
@@ -75,7 +76,7 @@ def test_partial_last_preset_record_round_trips(tune_path):
     """A source ending part-way into its last preset record re-emits as is."""
     song = read(tune_path)
     image = song.image[:-3]
-    short = parse(bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + image)
+    short = parse(reader.load_prefix(song.load_addr) + image)
     assert len(short.instruments) == len(song.instruments)
     assert short.instruments[-1] == Instrument.from_bytes(song.image[-8:-3])
     assert writer.build(short) == image
@@ -89,7 +90,7 @@ def test_load_address_is_standard(tune_path):
 def test_prg_container_round_trips(tune_path):
     """A bare .prg (load prefix + image) parses to the same image."""
     song = read(tune_path)
-    prg = bytes((song.load_addr & 0xFF, song.load_addr >> 8)) + song.image
+    prg = reader.load_prefix(song.load_addr) + song.image
     reparsed = parse(prg)
     assert reparsed.image == song.image
     assert reparsed.load_addr == song.load_addr
@@ -105,9 +106,7 @@ def test_truncated_inputs():
 
 def _prg(song, image=None):
     load = song.load_addr
-    return bytes((load & 0xFF, load >> 8)) + bytes(
-        song.image if image is None else image
-    )
+    return reader.load_prefix(load) + bytes(song.image if image is None else image)
 
 
 def test_rejects_image_without_player():
@@ -126,8 +125,12 @@ def test_rejects_image_without_player():
         (0x1000, 0x100, False),  # low RAM
     ],
 )
-def test_image_in_io_area_boundaries(load, length, expected):
-    assert reader.image_in_io_area(load, length) is expected
+def test_require_ram_boundaries(load, length, expected):
+    if expected:
+        with pytest.raises(SidParseError, match="I/O area"):
+            reader.require_ram(load, length, "image")
+    else:
+        reader.require_ram(load, length, "image")
 
 
 def test_rejects_image_fully_in_io_area():
@@ -175,7 +178,7 @@ def test_rejects_base_outside_image(tune_path):
 
 def test_rejects_unterminated_orderlist():
     view = reader.load_view(bytes((0x00, 0x10, 0x00, 0x10)) + bytes(0x1100), 0x1000)
-    bases = {"order_lo": 0x1000, "order_hi": 0x1002}
+    bases = SimpleNamespace(order_lo=0x1000, order_hi=0x1002)
     with pytest.raises(SidParseError, match="no terminator"):
         reader.parse_orderlist(view, bases, 0)  # pylint: disable=protected-access
 
@@ -275,7 +278,7 @@ def test_pattern_keeps_inline_ff_args(tune_path):
 )
 def test_orderlist_ends_where_the_player_stops_reading(data, rule, count, terminator):
     view = reader.load_view(bytes((0x04, 0x10, 0x00, 0x00)) + bytes(data), 0x1000)
-    bases = {"order_lo": 0x1000, "order_hi": 0x1001}
+    bases = SimpleNamespace(order_lo=0x1000, order_hi=0x1001)
     orderlist = reader.parse_orderlist(view, bases, 0, rule)
     assert len(orderlist.entries) == count
     assert orderlist.terminator == terminator
@@ -286,7 +289,7 @@ def test_silence_entry_reads_no_control_byte():
     view = reader.load_view(
         bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFE, 0x87)), 0x1000
     )
-    bases = {"order_lo": 0x1000, "order_hi": 0x1001}
+    bases = SimpleNamespace(order_lo=0x1000, order_hi=0x1001)
     orderlist = reader.parse_orderlist(
         view, bases, 0
     )  # pylint: disable=protected-access
@@ -300,7 +303,7 @@ def test_jump_entry_carries_its_target():
     view = reader.load_view(
         bytes((0x04, 0x10, 0x00, 0x00)) + bytes((0x01, 0x00, 0xFD, 0x04)), 0x1000
     )
-    bases = {"order_lo": 0x1000, "order_hi": 0x1001}
+    bases = SimpleNamespace(order_lo=0x1000, order_hi=0x1001)
     orderlist = reader.parse_orderlist(view, bases, 0, grammar.ORDERLIST_HOOK)
     assert orderlist.terminator == constants.ORDER_JUMP
     assert orderlist.entries[-1].pattern_id == constants.ORDER_JUMP

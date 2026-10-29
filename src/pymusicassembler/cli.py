@@ -57,6 +57,11 @@ def _resave(args) -> None:
     print(f"wrote {args.output}")
 
 
+def address(text: str) -> int:
+    """A C64 address argument: ``$C000``, ``0xC000`` or decimal."""
+    return int(text.replace("$", "0x"), 0)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pymusicassembler", description="Music Assembler song tools"
@@ -87,7 +92,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     resave.add_argument(
         "--base",
-        type=lambda text: int(text.replace("$", "0x"), 0),
+        type=address,
         help="native song base address, e.g. $C000 (default: the source's)",
     )
     resave.set_defaults(func=_resave)
