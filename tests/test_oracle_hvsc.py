@@ -31,9 +31,8 @@ supports, each confirmed byte-exact against the deterministic sidtrace oracle:
 * Resonance stored to a SID mirror (``$D430``, aliasing voice 3's pulse-width
   low): crumb.
 
-Each tune is rendered over the ``SECONDS`` window -- far deeper than an opening
-window -- so the comparison spans multiple orderlist loop points (a regression
-can strike late in a composition).  Tunes play one call per frame
+Each tune is rendered over its whole song length, so the comparison spans
+multiple orderlist loop points (a regression can strike late in a composition).  Tunes play one call per frame
 (single-speed); the player renders one leading silent play call before the
 first audible frame, which ``make_oracle_fixtures`` aligns over via ``max_lead``.
 """
@@ -46,9 +45,6 @@ from pysidtracker import make_oracle_fixtures
 # The player renders one leading silent play call the oracle write-stream cannot
 # see, so render a few extra frames for make_oracle_fixtures to align over.
 _MAX_LEAD = 4
-
-# Oracle render window (seconds): deep into each (looping) composition so late-in-song differences are in the compared span.
-SECONDS = 101
 
 TUNES = {
     # Standard $1021 PSID (player base $1000, load = base+$21).
@@ -87,8 +83,6 @@ def _render(data, nframes):
 tune_id, oracle_match = make_oracle_fixtures(
     TUNES,
     render=_render,
-    frames=None,
-    seconds=SECONDS,
     max_lead=_MAX_LEAD,
 )
 

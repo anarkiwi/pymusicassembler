@@ -7,6 +7,7 @@ from pysidtracker.formats import discover_formats, find_format
 from pysidtracker.maincli import main as pysidtracker_main
 from pysidtracker.pathdiff import subject
 from pysidtracker.snapshot import digest, fingerprint
+from pysidtracker.testing import song_frames
 
 from pymusicassembler import Player
 from pymusicassembler.formats import MUSIC_ASSEMBLER, Tune
@@ -62,6 +63,11 @@ def test_snapshot_probes_digest_build_and_native(native_tune_path, jump_tune_pat
     tune = MUSIC_ASSEMBLER.load(data)
     assert fingerprint(data, MUSIC_ASSEMBLER) == {
         "model": digest(tune),
+        "render": digest(
+            np.asarray(
+                Player(tune.song).render_grid(song_frames(data, None)), np.uint8
+            ).tobytes()
+        ),
         "build": digest(image),
         "native": digest(image),
         "grammar": digest(tuple(MUSIC_ASSEMBLER.listing(tune))),

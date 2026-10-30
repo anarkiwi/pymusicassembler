@@ -42,9 +42,6 @@ TUNES = {
     "irq_digimix": "MUSICIANS/A/Albartus_Jan/Play_the_Mix.sid",
 }
 
-# At least the longest HVSC song length of TUNES, in seconds.
-SECONDS = 101
-
 
 def _render(data, nframes):
     song = start_subtune(data) + 1
@@ -53,11 +50,9 @@ def _render(data, nframes):
 
 tune_id, oracle_match = make_oracle_fixtures(
     TUNES,
-    # Whole-song traces, apart from test_oracle_hvsc's shorter ones of the same stems.
+    # Separate cache from test_oracle_hvsc's traces of the same stems.
     oracle_cache=default_cache("csv") / "songs",
     render=_render,
-    frames=None,
-    seconds=SECONDS,
     max_lead=_MAX_LEAD,
 )
 
