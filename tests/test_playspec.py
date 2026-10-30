@@ -12,6 +12,7 @@ from pymusicassembler.player import MAX_CYCLES
 
 FRAMES = 300  # a stream-validation window, not a gate
 SPACE = "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid"
+FILTER_REGS = 0x15  # the first register past the three voices
 RAM = ((0, 0x100), (0x200, 0xD400), (0xD800, 0x10000))
 
 
@@ -20,10 +21,15 @@ def _tune(path):
 
 
 def assert_memory_equals_the_6502(data):
-    """After every call of the tune's whole song the 64 KiB outside the stack page
-    and the SID/IO window equal the tune's own play routine's."""
+    """After every call of the tune's whole song the SID registers and the 64 KiB
+    outside the stack page and the SID/IO window equal the tune's own play
+    routine's. A resonance stored to a SID mirror (Crumb's ``$D430``, which the
+    layout folds to ``$D410``) is not a register of the CPU run's, so its
+    voice-3 register is not compared."""
     song = parse(data)
     spec = Player(song)
+    folded = spec.layout.res_sta - spec.layout.sid
+    skip = folded if folded < FILTER_REGS else None
     cpu = EmuPlayer(
         song.image,
         song.load_addr,
@@ -32,7 +38,10 @@ def assert_memory_equals_the_6502(data):
         max_cycles=MAX_CYCLES,
     )
     for frame in range(song_frames(data, None)):
-        assert spec.play_frame() == cpu.play_frame(), frame
+        spec.play_frame()
+        cpu.play_frame()
+        for reg, (mine, real) in enumerate(zip(spec.regs, cpu.regs)):
+            assert reg == skip or mine == real, (frame, reg)
         mine, real = spec.memory, bytes(cpu._mem)  # pylint: disable=protected-access
         for lo, hi in RAM:
             assert mine[lo:hi] == real[lo:hi], (frame, hex(lo))
