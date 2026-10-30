@@ -5,11 +5,12 @@ import pytest
 from pysidtracker.oracle import EmuPlayer
 from pysidtracker.playspec import smt
 from pysidtracker.playspec.tv import validate
+from pysidtracker.testing import song_frames
 
 from pymusicassembler import Player, parse, playspec
 from pymusicassembler.player import MAX_CYCLES
 
-FRAMES = 300
+FRAMES = 300  # a stream-validation window, not a gate
 SPACE = "MUSICIANS/B/Bayliss_Richard/Space_Invadarz_on_Vacation.sid"
 RAM = ((0, 0x100), (0x200, 0xD400), (0xD800, 0x10000))
 
@@ -18,10 +19,10 @@ def _tune(path):
     return parse(path.read_bytes())
 
 
-def test_spec_memory_equals_the_6502(tune_path):
-    """Every call leaves the 64 KiB outside the stack page and the SID/IO window
-    as the tune's own play routine does."""
-    song = _tune(tune_path)
+def assert_memory_equals_the_6502(data):
+    """After every call of the tune's whole song the 64 KiB outside the stack page
+    and the SID/IO window equal the tune's own play routine's."""
+    song = parse(data)
     spec = Player(song)
     cpu = EmuPlayer(
         song.image,
@@ -30,11 +31,15 @@ def test_spec_memory_equals_the_6502(tune_path):
         song.play_addr,
         max_cycles=MAX_CYCLES,
     )
-    for frame in range(FRAMES):
+    for frame in range(song_frames(data, None)):
         assert spec.play_frame() == cpu.play_frame(), frame
         mine, real = spec.memory, bytes(cpu._mem)  # pylint: disable=protected-access
         for lo, hi in RAM:
             assert mine[lo:hi] == real[lo:hi], (frame, hex(lo))
+
+
+def test_spec_memory_equals_the_6502(tune_path):
+    assert_memory_equals_the_6502(tune_path.read_bytes())
 
 
 def test_streams_the_player_reads_parse_under_the_song_grammar(tune_path):
