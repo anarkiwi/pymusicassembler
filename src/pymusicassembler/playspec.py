@@ -14,7 +14,7 @@ from importlib import resources
 from pysidtracker import CodePattern, SidImage, find_code_all
 from pysidtracker.errors import SidError
 from pysidtracker.playspec import load
-from pysidtracker.playspec.unnative import unnative
+from pysidtracker.playspec.unnative import count_natives, unnative
 
 from pymusicassembler import layout
 
@@ -73,6 +73,12 @@ def bind(view, entry):
     found.pop("order_native")
     found.pop("order_resume")
     return SPEC, found
+
+
+def has_native(spec) -> bool:
+    """Whether ``spec`` still holds a ``native`` statement: a tune bound to it runs
+    machine code the spec does not state, so it is not played from standard notes."""
+    return bool(count_natives(spec.machines) + count_natives(spec.procs))
 
 
 def entries(view):

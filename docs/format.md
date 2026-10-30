@@ -292,6 +292,26 @@ which overrides the base's `order_wrap` proc; `playspec.bind` chooses it.
 a further variant of it. Each
 stream is validated under the orderlist rule the layout selects.
 
+### Spec registration and standard notes
+
+`MUSIC_ASSEMBLER.spec(Tune(song))` is the format's `SpecBinding`: the variant
+`playspec.bind` chooses for the instance the tune's init leaves, `bind` itself, the
+song's own `image` and its subtune. `MUSIC_ASSEMBLER.spec_player(tune)` plays the
+tune's image as that spec, with `Player`'s grid for a tune that has a play address
+(an interrupt-hosted tune runs on its own 6502 under `Player`, and under
+`spec_player` traps the modelled entry). `playspec.has_native(spec)` is true when
+the variant still holds a `native` statement, a hook `unnative` could not state.
+
+`freq_lo` and `freq_hi` are declared `notes(lo, 0)` and `notes(hi, 0)`: table index
+`i` is standard note `i`, C0 being note 0. Every read of the table indexes it by the
+pattern's note byte plus the orderlist transpose (`note`) or by a program row's
+note plus the held note index, or the row's absolute index on a `pitch_skip`
+build (`program`), and the table's first entry is the C0 word, so no offset applies.
+`spec_player(tune, notes=clock)` answers each of those reads with
+`pysidtracker.notes.frequency(i, clock)`, including an index past the 96 entries of
+the tune's own table; without `notes` the tune's table is read. The hook variant
+extends the base and inherits the declaration.
+
 `Player(song)` exposes `.play_frame() -> list[(reg, val)]` and `.regs`;
 `iter_frames(song, max_frames)` yields per-frame writes; `render_grid(song,
 nframes)` returns the forward-filled 25-register grid. `iter_register_writes`
