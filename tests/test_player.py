@@ -9,6 +9,7 @@ Byte-exact validation against the SID register oracle lives in
 import pytest
 
 from pysidtracker import CodePattern, SidImage, power_on_ram
+from pysidtracker.errors import SidError
 from pysidtracker.asm6502 import assemble
 from pysidtracker.playspec.unnative import equivalent, unnative
 from pymusicassembler import constants, playspec, reader
@@ -848,3 +849,23 @@ def test_a_rips_order_hook_stated_as_a_variant_plays_the_same(tune_path):
         )
 
     equivalent(make, playspec.HOOK_SPEC, stated, frames=60)
+
+
+def test_bind_states_a_rips_order_hook_without_machine_code(tune_path):
+    song = _native_order_hook(reader.read(tune_path))
+    hooked = Player(song)
+    spec, _ = playspec.bind(hooked.view(), hooked.entry)
+    assert spec is not playspec.HOOK_SPEC
+    assert "native" not in spec.sources[spec.name]
+
+
+def test_bind_keeps_a_hook_it_cannot_state_as_native(tune_path, monkeypatch):
+    song = _native_order_hook(reader.read(tune_path))
+    hooked = Player(song)
+
+    def refuse(*_args, **_kwargs):
+        raise SidError("not statable")
+
+    monkeypatch.setattr(playspec, "unnative", refuse)
+    spec, _ = playspec.bind(hooked.view(), hooked.entry)
+    assert spec is playspec.HOOK_SPEC

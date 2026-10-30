@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymusicassembler"
-version = "0.11.1"
+version = "0.12.0"
 description = "Pure-Python reader, writer, and player for Music Assembler SID songs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,7 +22,7 @@ classifiers = [
 # EmuPlayer boot, render_player_*, cadence_info and the media-aware
 # `fixtures fetch` back the player, audio, survey renderer and test fixtures.
 # lark (Transformer) builds the song-stream models under pysidtracker.bytegrammar.
-dependencies = ["lark>=1.2", "pysidtracker>=0.48.1"]
+dependencies = ["lark>=1.2", "pysidtracker>=0.50.0"]
 
 [project.optional-dependencies]
 dev = [
