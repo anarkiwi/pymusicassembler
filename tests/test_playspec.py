@@ -60,6 +60,14 @@ def test_streams_the_player_reads_parse_under_the_song_grammar(tune_path):
     assert not player.validator.failures()
 
 
+def test_later_build_streams_parse_under_their_orderlist_dialect(later_tune_path):
+    """``$FC t`` and ``$FD n`` are commands of the rule the build selects."""
+    player = Player(_tune(later_tune_path), validate=True)
+    player.render_grid(FRAMES)
+    assert player.validator.results
+    assert not player.validator.failures()
+
+
 @pytest.mark.oracle
 def test_row_reader_is_proven_against_the_6502(tune):
     """``voice[0].parse`` equals the 6502 row reader for all initial memory."""

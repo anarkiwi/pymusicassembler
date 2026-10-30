@@ -1,15 +1,1 @@
-[
-  {
-    "compare": "lead",
-    "frames": 9897,
-    "id": "9fa900e38eb3",
-    "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._frame:156>159')",
-    "kind": "first",
-    "left": "6502",
-    "md5": "728dff7223f47527803bdf8b35380d8f",
-    "reason": "pymusicassembler/player.py:156 if self._hosted is not None: -> 159: reference frame 9888, register $17 res_filt",
-    "relpath": "MUSICIANS/W/Wells_Jon/Project_Argus_End.sid",
-    "right": "format:musicassembler",
-    "song": 1
-  }
-]
+[]

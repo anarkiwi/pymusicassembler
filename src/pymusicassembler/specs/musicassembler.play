@@ -17,8 +17,8 @@ layout {
   arp_phase_rd, arp_down_src, arp_down_step, arp_down_dst, arp_down_hi,
   arp_up_src, arp_up_step, arp_up_dst, arp_up_hi, arp_substep_inc, arp_speed,
   arp_substep_cmp, arp_substep_clr, arp_phase_inc, inner_lo, inner_hi, sid,
-  res_sta, fc_sid, order_jump, program_jump, pw_substep_cmp, zp_ptr, zp_tmp,
-  pitch_op: addr;
+  res_sta, fc_sid, order_jump, program_jump, pw_substep_cmp, order_native,
+  order_resume, zp_ptr, zp_tmp, pitch_op: addr;
   pitch_skip, order_end, order_restart: byte;
   arp_down_cmp, pulse_always, pulse_cmp_adc: flag;
   order_tempo, output_voices: list;
@@ -267,7 +267,10 @@ machine voice[x in 0..3] {
   // The orderlist step: tempo/jump commands, the end marker and restart.
   proc order_step() {
     zp_ptr := order[x];
-    stream ord = zp_ptr @ order_cursor + 2 grammar "pymusicassembler.grammar:GRAMMAR:orderlist";
+    stream ord = zp_ptr @ order_cursor + 2
+      grammar "pymusicassembler.grammar:GRAMMAR:orderlist_inline" if len(L.order_tempo) != 0,
+              "pymusicassembler.grammar:GRAMMAR:orderlist_hook" if L.order_jump != 0,
+              "pymusicassembler.grammar:GRAMMAR:orderlist";
     while (len(L.order_tempo) != 0 && ord[0] == ORDER_TEMPO)
         || (L.order_jump != 0 && ord[0] == ORDER_JUMP) bound 256 {
       if len(L.order_tempo) != 0 && ord[0] == ORDER_TEMPO {
@@ -281,7 +284,9 @@ machine voice[x in 0..3] {
         order_jump := ord.pos;
       }
     }
-    if ord[0] == L.order_end {
+    if L.order_native != 0 {
+      native L.order_native(a = ord[0], x = x, y = ord.pos) resumes L.order_resume;
+    } elif ord[0] == L.order_end {
       ord.pos := L.order_restart;
     }
     order_cursor := ord.pos;

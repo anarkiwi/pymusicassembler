@@ -8,7 +8,7 @@ Byte-exact validation against the SID register oracle lives in
 
 import pytest
 
-from pysidtracker import power_on_ram
+from pysidtracker import CodePattern, SidImage, power_on_ram
 from pysidtracker.asm6502 import assemble
 from pymusicassembler import constants, playspec, reader
 from pymusicassembler.errors import MusicAssemblerParseError
@@ -198,6 +198,45 @@ def test_orderlist_commands_of_a_later_build(later_tune_path):
     assert rd(player, lay.order_cursor) == 0
     assert rd(player, lay.pattern_id) == 0x07
     assert rd(player, lay.transrep) == 0x21 and rd(player, lay.repeat) == 1
+
+
+def _native_order_hook(song):
+    """``song`` whose orderlist step jumps to a routine of its own that marks the
+    ``$FF`` it is handed in ``$C100`` and returns to the code after the compare."""
+    image = SidImage.from_prg(song.load_addr.to_bytes(2, "little") + bytes(song.image))
+    found = Player(song).layout
+    if found.variant.entries["order_step"].value != "plain":
+        pytest.skip("this build's step calls the order hook")
+    entry = found.entry
+    step = image.find_code(CodePattern("C8 B1 ?? C9 ?? D0 02 A0 ??"), start=entry).addr
+    hook = song.load_addr + len(song.image)
+    code, _ = assemble(
+        f"""
+  CMP #$FF
+  BNE back
+  LDA #$5A
+  STA $C100
+back: JMP ${step + 9:04X}
+""",
+        hook,
+    )
+    patched = bytearray(song.image) + bytes(code)
+    for i, byte in enumerate((0x4C, hook & 0xFF, hook >> 8, 0xEA)):
+        patched[step + 3 + i - song.load_addr] = byte
+    song.image = bytes(patched)
+    return song
+
+
+def test_a_rips_own_order_hook_runs_on_the_cpu(tune_path):
+    """The step hands the rip's routine the byte it read and carries on where it
+    returns, so an end marker it does not restart on is played as the pattern id."""
+    player = Player(_native_order_hook(reader.read(tune_path)))
+    lay = player.layout
+    assert lay.order_native
+    _orderlist(player, 0, (0x07, 0x21, 0xFF, 0x00))
+    assert rd(player, 0xC100) == 0x5A
+    assert rd(player, lay.pattern_id) == 0xFF
+    assert rd(player, lay.order_cursor) == 2
 
 
 def test_orderlist_without_tempo_command_reads_it_as_a_pattern(tune_path):
