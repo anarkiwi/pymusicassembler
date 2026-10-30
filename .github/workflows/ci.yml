@@ -64,8 +64,8 @@ jobs:
           key: ${{ hashFiles('tests/test_oracle_*.py', 'tests/fixtures/pathdiff.json') }}
           sidtrace: "true"
           tunes: tests/test_oracle_hvsc.py tests/test_oracle_songs.py tests/fixtures/pathdiff.json
-      - name: DIAG
-        run: PYTHONPATH=scripts python scripts/diag_digimix.py
+      - name: Oracle comparison (never skipped)
+        run: pytest -m oracle -n auto
 
   build:
     runs-on: ubuntu-latest

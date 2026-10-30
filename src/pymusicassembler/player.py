@@ -14,6 +14,7 @@ raises as the oracle is.
 from typing import List, Optional
 
 from pysidtracker import PSID_MAGIC, RSID_MAGIC, SidParseError, parse_sid_header
+from pysidtracker.irqhost import InterruptPlayer
 from pysidtracker.playspec import SpecPlayer
 from pysidtracker.registers import sid_model_for_flags
 
@@ -57,6 +58,22 @@ class Player(SpecPlayer):
             ntsc=bool(header and header.is_ntsc),
             sid=song.container_header + song.image if header else None,
         )
+
+    def _host(self, subtune: int) -> None:
+        """Boot the tune's interrupts on its own 6502, with no entry trapped.
+
+        A play call run as the spec is an instant, so an NMI digi beside the music
+        would sample at other cycles than on the machine; the tune's own code
+        keeps the oracle's timing. The layout is bound to the entry its vectors
+        reach (:meth:`_probe`).
+        """
+        if self._sid is None:
+            super()._host(subtune)
+            return
+        self._hosted = InterruptPlayer(self._sid, subtune, clock=self._clock)
+        machine = self._hosted.host.machine
+        self._mpu = machine.mpu
+        self._obs = self._bus = machine
 
     def _init(self, subtune: int) -> None:
         """Boot the tune (hosting its interrupts when play is 0), then bind its layout."""
