@@ -243,8 +243,11 @@ def test_arp_operands_name_the_standard_cells(tune_path):
     player = Player(reader.read(tune_path))
     lay = player.layout
 
+    mem = player.memory
+
     def cell(name):
-        return player._indexed(getattr(lay, f"arp_{name}"), 0)
+        at = getattr(lay, f"arp_{name}")
+        return mem[at] | mem[at + 1] << 8
 
     assert {cell(n) for n in ("down_src", "down_dst", "up_src", "up_dst")} == {
         lay.freq_lo_w

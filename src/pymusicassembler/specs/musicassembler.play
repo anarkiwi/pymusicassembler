@@ -1,0 +1,491 @@
+// Music Assembler playroutine (every build pymusicassembler's layout discovers).
+// One play call: the tempo clock, then the three voices in order. Every name
+// L.* is a player address, flag or list resolved from the build's layout.
+spec musicassembler;
+
+layout {
+  entry, tempo, tempo_reload, order_lo, order_hi, pattern_id, transrep,
+  transrep_byte, repeat, ctrl, gate_ctrl, pattern_lo, pattern_hi, pat_cursor,
+  dur, dur_short, dur_long, dur_note, ctrl_mask, gate_mask, instr_x8,
+  note_index, freq_lo, freq_lo_w, vib_freq_lo, freq_hi, freq_hi_w,
+  vib_freq_hi, note_ctl, vib_lo_step, vib_hi_step, vib_out_lo, vib_out_hi,
+  filter_owner, fc_acc_reset, fc_step, fc_ctr_reset, res_presets, vib_toggle,
+  arp_substep, arp_phase, order_cursor, instr_cursor, instr, voice_reg, pw_lo,
+  pw_hi, fc_acc, fc_ctr, trigger_owner, trigger_acc, trigger_ctr, sweep_owner,
+  sweep_ctr, sweep_dec, sweep_acc, sweep_step, sweep_sta, program_acc,
+  pw_substep, pw_dir, porta_ctr, flags, arp, arp_porta_dec, arp_porta_inc,
+  arp_phase_rd, arp_down_src, arp_down_step, arp_down_dst, arp_down_hi,
+  arp_up_src, arp_up_step, arp_up_dst, arp_up_hi, arp_substep_inc, arp_speed,
+  arp_substep_cmp, arp_substep_clr, arp_phase_inc, inner_lo, inner_hi, sid,
+  res_sta, fc_sid, order_jump, program_jump, zp_ptr, zp_tmp, pitch_op: addr;
+  pitch_skip, order_end, order_restart: byte;
+  arp_down_cmp, pulse_always: flag;
+  order_tempo, output_voices: list;
+}
+
+const SILENCE = 0xFE;
+const DUR_MIN = 0x60;
+const INSTR_MIN = 0x80;
+const LONGDUR_MIN = 0xA0;
+const PATTERN_END = 0xFF;
+const ORDER_TEMPO = 0xFC;
+const ORDER_JUMP = 0xFD;
+const PROGRAM_JUMP = 0xFD;
+const CTL_FILTER = 0x80;
+const CTL_VIBARP = 0x20;
+const DUR_MASK = 0x1F;
+const FREQ_LO = 0;
+const FREQ_HI = 1;
+const PW_LO = 2;
+const PW_HI = 3;
+const CTRL = 4;
+const AD = 5;
+const SR = 6;
+
+// Song data the player only reads: tables and split pointer tables.
+cell freq_lo: u8[128] @ L.freq_lo ro;
+cell freq_hi: u8[128] @ L.freq_hi ro;
+cell pattern: ptr[256] @ (L.pattern_lo, L.pattern_hi) ro;
+cell order: ptr[3] @ (L.order_lo, L.order_hi) ro;
+cell inner: ptr[16] @ (L.inner_lo, L.inner_hi) ro;
+cell i_ad: u8[256] @ L.instr ro;
+cell i_sr: u8[256] @ L.instr + 1 ro;
+cell i_wave: u8[256] @ L.instr + 2 ro;
+cell i_pulse: u8[256] @ L.instr + 3 ro;
+cell i_pulse_step: u8[256] @ L.instr + 4 ro;
+cell i_arp_speed: u8[256] @ L.instr + 5 ro;
+cell i_porta: u8[256] @ L.instr + 7 ro;
+cell res_presets: u8[3] @ L.res_presets ro;
+cell voice_reg: u8[3] @ L.voice_reg ro;
+cell arp_dir: u8[4] @ L.arp ro;
+
+// Shared work cells; immediates the player rewrites live in its operands.
+cell tempo: u8 @ L.tempo;
+cell tempo_reload: u8 @ L.tempo_reload operand;
+cell filter_owner: u8 @ L.filter_owner;
+cell fc_acc_reset: u8 @ L.fc_acc_reset;
+cell fc_step: u8 @ L.fc_step;
+cell fc_ctr_reset: u8 @ L.fc_ctr_reset;
+cell res_sta: u8 @ L.res_sta;
+cell fc_acc: u8 @ L.fc_acc;
+cell fc_ctr: u8 @ L.fc_ctr;
+cell trigger_owner: u8 @ L.trigger_owner operand;
+cell trigger_acc: u8 @ L.trigger_acc operand;
+cell trigger_ctr: u8 @ L.trigger_ctr operand;
+cell sweep_owner: u8 @ L.sweep_owner;
+cell sweep_ctr: u8 @ L.sweep_ctr operand;
+cell sweep_dec: u8 @ L.sweep_dec;
+cell sweep_acc: u8 @ L.sweep_acc operand;
+cell sweep_step: u8 @ L.sweep_step operand;
+cell sweep_sta: u8 @ L.sweep_sta;
+cell program_acc: u8 @ L.program_acc;
+cell sid: u8[32] @ L.sid out;
+cell zp_ptr: u16 @ L.zp_ptr;
+cell zp_tmp: u8 @ L.zp_tmp;
+cell pitch_op: u8 @ L.pitch_op operand;
+cell fc_hi: u8 @ L.fc_sid + 0x16 out;
+
+// The arpeggio code's abs,X / abs,Y operands, rewritten when it is relocated.
+cell op_porta_dec: u16 @ L.arp_porta_dec operand;
+cell op_porta_inc: u16 @ L.arp_porta_inc operand;
+cell op_phase_rd: u16 @ L.arp_phase_rd operand;
+cell op_down_src: u16 @ L.arp_down_src operand;
+cell op_down_step: u16 @ L.arp_down_step operand;
+cell op_down_dst: u16 @ L.arp_down_dst operand;
+cell op_down_hi: u16 @ L.arp_down_hi operand;
+cell op_up_src: u16 @ L.arp_up_src operand;
+cell op_up_step: u16 @ L.arp_up_step operand;
+cell op_up_dst: u16 @ L.arp_up_dst operand;
+cell op_up_hi: u16 @ L.arp_up_hi operand;
+cell op_substep_inc: u16 @ L.arp_substep_inc operand;
+cell op_speed: u16 @ L.arp_speed operand;
+cell op_substep_cmp: u16 @ L.arp_substep_cmp operand;
+cell op_substep_clr: u16 @ L.arp_substep_clr operand;
+cell op_phase_inc: u16 @ L.arp_phase_inc operand;
+
+// The play-call divider: a row frame when the counter underflows.
+machine clock {
+  signal row: bool = false;
+  step {
+    tempo -= 1;
+    if neg(tempo) {
+      tempo := tempo_reload;
+      row := true;
+    }
+  }
+}
+
+machine voice[x in 0..3] {
+  cell dur: u8 @ L.dur + x;
+  cell pattern_id: u8 @ L.pattern_id + x;
+  cell pat_cursor: u8 @ L.pat_cursor + x;
+  cell transrep: u8 @ L.transrep + x;
+  cell transrep_byte: u8 @ L.transrep_byte + x;
+  cell repeat: u8 @ L.repeat + x;
+  cell order_cursor: u8 @ L.order_cursor + x;
+  cell order_jump: u8 @ L.order_jump + x;
+  cell gate_ctrl: u8 @ L.gate_ctrl + x;
+  cell gate_mask: u8 @ L.gate_mask + x;
+  cell ctrl: u8 @ L.ctrl + x;
+  cell ctrl_mask: u8 @ L.ctrl_mask + x;
+  cell dur_short: u8 @ L.dur_short + x;
+  cell dur_long: u8 @ L.dur_long + x;
+  cell dur_note: u8 @ L.dur_note + x;
+  cell instr_x8: u8 @ L.instr_x8 + x;
+  cell instr_cursor: u8 @ L.instr_cursor + x;
+  cell program_jump: u8 @ L.program_jump + x;
+  cell note_index: u8 @ L.note_index + x;
+  cell note_ctl: u8 @ L.note_ctl + x;
+  cell freq_lo_w: u8 @ L.freq_lo_w + x;
+  cell freq_hi_w: u8 @ L.freq_hi_w + x;
+  cell vib_freq_lo: u8 @ L.vib_freq_lo + x;
+  cell vib_freq_hi: u8 @ L.vib_freq_hi + x;
+  cell vib_lo_step: u8 @ L.vib_lo_step + x;
+  cell vib_hi_step: u8 @ L.vib_hi_step + x;
+  cell vib_out_lo: u8 @ L.vib_out_lo + x;
+  cell vib_out_hi: u8 @ L.vib_out_hi + x;
+  cell vib_toggle: u8 @ L.vib_toggle + x;
+  cell arp_substep: u8 @ L.arp_substep + x;
+  cell arp_phase: u8 @ L.arp_phase + x;
+  cell pw_lo: u8 @ L.pw_lo + x;
+  cell pw_hi: u8 @ L.pw_hi + x;
+  cell pw_substep: u8 @ L.pw_substep + x;
+  cell pw_dir: u8 @ L.pw_dir + x;
+  cell porta_ctr: u8 @ L.porta_ctr + x;
+  cell flags: u8 @ zp(L.flags + x);
+
+  // Bit 6 of the note-control byte: the note's trigger frame has run.
+  control phase on note_ctl mask 0x40 { fresh = 0x00, held = 0x40 }
+
+  step {
+    if clock.row {
+      dur -= 1;
+      if neg(dur) {
+        parse();
+        return;
+      }
+    }
+    output();
+  }
+
+  // The row reader: one pattern row from the voice's pattern stream.
+  proc parse() {
+    let pid = pattern_id;
+    if pid == SILENCE {
+      gate_off();
+      return;
+    }
+    zp_ptr := pattern[pid];
+    stream pat = zp_ptr @ pat_cursor grammar "pymusicassembler.grammar:GRAMMAR:pattern";
+    let val = next pat;
+    if val >= LONGDUR_MIN {
+      dur_long := val & DUR_MASK;
+    } elif val >= INSTR_MIN {
+      instr_x8 := val << 3;
+      val := next pat;
+      if val >= DUR_MIN {
+        duration(val);
+      } else {
+        note(pat, val);
+      }
+    } elif val >= DUR_MIN {
+      duration(val);
+    } else {
+      note(pat, val);
+    }
+    row_end(pat);
+  }
+
+  proc gate_off() {
+    gate_ctrl &= 0xFE;
+  }
+
+  proc duration(val: u8) {
+    dur_short := val & DUR_MASK;
+    gate_mask := 0xFE;
+    gate_off();
+  }
+
+  // The note row: every pattern byte is read where the 6502 reads it, so a
+  // work-cell store aliasing the pattern is seen exactly as the player sees it.
+  proc note(pat: stream, n: u8) {
+    zp_tmp := n;
+    let idx = (transrep >> 4) + zp_tmp;
+    note_index := idx;
+    let lo = freq_lo[idx];
+    freq_lo_w := lo;
+    vib_freq_lo := lo;
+    let hi = freq_hi[idx];
+    freq_hi_w := hi;
+    vib_freq_hi := hi;
+    zp_tmp := pat.pos;
+    pat.pos := zp_tmp;
+    let ctl = pat[0];
+    note_ctl := ctl;
+    dur_note := ctl & DUR_MASK;
+    let ctl2 = pat[0];
+    if ctl2 & CTL_FILTER != 0 {
+      filter_owner := x;
+      pat.pos += 1;
+      let param = pat[0];
+      fc_acc_reset := param;
+      fc_step := ((param & 0x0F) << 1) - 0x10;
+      pat.pos += 1;
+      let res = pat[0];
+      if res != 0 {
+        fc_ctr_reset := res;
+      }
+      res_sta := ite(res != 0, res_presets[x], 0xF0);
+    } elif ctl2 & CTL_VIBARP != 0 {
+      pat.pos += 1;
+      vib_lo_step := pat[0];
+      pat.pos += 1;
+      vib_hi_step := pat[0];
+    }
+    pat.pos += 1;
+    ctrl_mask := 0xFF;
+    vib_toggle := 0xFF;
+    arp_substep := 0;
+    arp_phase := 0;
+  }
+
+  // Row end: keep the cursor, or at the pattern end count down its repeats.
+  proc row_end(pat: stream) {
+    if pat[0] != PATTERN_END {
+      pat_cursor := pat.pos;
+      return;
+    }
+    repeat -= 1;
+    if neg(repeat) {
+      order_step();
+    }
+    pat_cursor := 0;
+  }
+
+  // The orderlist step: tempo/jump commands, the end marker and restart.
+  proc order_step() {
+    zp_ptr := order[x];
+    stream ord = zp_ptr @ order_cursor + 2 grammar "pymusicassembler.grammar:GRAMMAR:orderlist";
+    while (len(L.order_tempo) != 0 && ord[0] == ORDER_TEMPO)
+        || (L.order_jump != 0 && ord[0] == ORDER_JUMP) bound 256 {
+      if len(L.order_tempo) != 0 && ord[0] == ORDER_TEMPO {
+        let t = ord[1];
+        for c in L.order_tempo {
+          mem[c] := t;
+        }
+        ord.pos += 2;
+      } else {
+        ord.pos := ord[1] << 1;
+        order_jump := ord.pos;
+      }
+    }
+    if ord[0] == L.order_end {
+      ord.pos := L.order_restart;
+    }
+    order_cursor := ord.pos;
+    pattern_id := ord[0];
+    let tr = ord[1];
+    transrep_byte := tr;
+    repeat := tr & 0x0F;
+  }
+
+  // The per-call output: trigger or sustain the note, then the SID writes. The
+  // instrument offset is kept in the zero-page temporary and re-read from it.
+  proc output() {
+    let x8 = instr_x8;
+    zp_tmp := x8;
+    in phase {
+      fresh => { trigger(x8); }
+      held => { sustain(); }
+    }
+    sid_final();
+  }
+
+  proc trigger(x8: u8) {
+    instr_cursor := 0;
+    mem[L.zp_ptr] := i_ad[x8];
+    let sr = i_sr[x8];
+    let ofs = u16(voice_reg[x]);
+    sid[ofs + SR] := sr;
+    sid[ofs + AD] := mem[L.zp_ptr];
+    sid[ofs + CTRL] := ctrl & 0xFE;
+    let y = zp_tmp;
+    ctrl := i_wave[y];
+    let pulse = i_pulse[y];
+    pw_lo := pulse;
+    pw_hi := pulse;
+    if x == trigger_owner {
+      fc_acc := trigger_acc;
+      fc_ctr := trigger_ctr;
+    }
+    pw_substep := 0;
+    pw_dir := 0;
+    porta_ctr := i_arp_speed[y] >> 3;
+    goto held;
+    flags := i_porta[y];
+  }
+
+  proc sustain() {
+    if x == sweep_owner && sweep_ctr != 0 {
+      sweep_dec -= 1;
+      let cutoff = sweep_acc + sweep_step;
+      sweep_sta := cutoff;
+      fc_hi := cutoff;
+    }
+    if flags & 0x0F != 0 {
+      program(flags & 0x0F);
+    } elif note_ctl & CTL_VIBARP == 0 && flags & 0x10 != 0 {
+      arp();
+    }
+    zp_tmp := i_pulse_step[zp_tmp];
+    pulse();
+  }
+
+  // Instrument arpeggio/portamento through self-relocated abs,X operands.
+  proc arp() {
+    let dec = op_porta_dec + x;
+    mem[dec] -= 1;
+    if !neg(mem[dec]) {
+      return;
+    }
+    mem[op_porta_inc + x] += 1;
+    let ascend = arp_dir[mem[op_phase_rd + x] & 3] != 0;
+    let y: u8 = 0;
+    if !ascend {
+      y := zp_tmp;
+      let step = mem[op_down_step + u16(y)];
+      let low = mem[op_down_src + x];
+      let down = low - step;
+      let dst = op_down_dst + x;
+      let c = false;
+      if L.arp_down_cmp {
+        c := down >= mem[dst];
+      } else {
+        c := low >= step;
+        mem[dst] := down;
+      }
+      if !c {
+        mem[op_down_hi + x] -= 1;
+        ascend := mem[op_down_hi + x] == 0;
+      }
+    }
+    if ascend {
+      y := zp_tmp;
+      let step = mem[op_up_step + u16(y)];
+      let src = mem[op_up_src + x];
+      mem[op_up_dst + x] := src + step;
+      if carry(src, step) {
+        mem[op_up_hi + x] += 1;
+      }
+    }
+    mem[op_substep_inc + x] += 1;
+    if mem[op_speed + u16(y)] & 0x0F == mem[op_substep_cmp + x] {
+      mem[op_substep_clr + x] := 0;
+      mem[op_phase_inc + x] += 1;
+    }
+  }
+
+  // The instrument's wave/pitch/filter program, three bytes a row, read through
+  // the zero-page pointer; the pitch goes through a self-modified LDY operand.
+  proc program(prog: u8) {
+    zp_ptr := inner[prog];
+    let y = instr_cursor;
+    ctrl := ind(zp(L.zp_ptr), y) & ctrl_mask;
+    y += 1;
+    let pitch = ind(zp(L.zp_ptr), y);
+    if pitch < 0x80 || L.pitch_skip == 0 {
+      pitch += note_index;
+    }
+    pitch_op := pitch & 0x7F;
+    y += 1;
+    let cutoff = ind(zp(L.zp_ptr), y);
+    if cutoff != 0 {
+      program_acc := cutoff;
+    }
+    y += 1;
+    let marker = ind(zp(L.zp_ptr), y);
+    if L.program_jump != 0 && marker == PROGRAM_JUMP {
+      let target = ind(zp(L.zp_ptr), y + 1);
+      if target == 0 || target >= program_jump + 3 {
+        y := 0;
+      } else {
+        y := target * 3;
+      }
+    } elif marker == 0xFE {
+      flags &= 0xF0;
+    } elif marker == 0xFF {
+      y := 0;
+    }
+    instr_cursor := y;
+    freq_lo_w := freq_lo[pitch_op];
+    freq_hi_w := freq_hi[pitch_op];
+  }
+
+  proc pulse() {
+    if flags & 0x40 != 0 || L.pulse_always {
+      let c = carry(zp_tmp, pw_lo);
+      pw_lo := zp_tmp + pw_lo;
+      pw_hi := zp_tmp + pw_hi + u8(c);
+    } elif flags & 0x20 != 0 {
+      if pw_dir != 0 {
+        let c = carry(pw_lo, zp_tmp);
+        pw_lo += zp_tmp;
+        if c {
+          pw_hi += 1;
+        }
+      } else {
+        let b = pw_lo < zp_tmp;
+        pw_lo -= zp_tmp;
+        if b {
+          pw_hi -= 1;
+        }
+      }
+      pw_substep += 1;
+      if zp_tmp & 0x0F == pw_substep {
+        pw_substep := 0;
+        pw_dir ^= 1;
+      }
+    }
+  }
+
+  proc sid_final() {
+    let ofs = u16(voice_reg[x]);
+    sid[ofs + CTRL] := ctrl;
+    sid[ofs + PW_HI] := pw_hi;
+    sid[ofs + PW_LO] := pw_lo;
+    if note_ctl & CTL_VIBARP != 0 {
+      let toggled: u8 = 0;
+      if vib_lo_step & 1 != 0 {
+        toggled := vib_toggle ^ 0xFF;
+        vib_toggle := toggled;
+      }
+      if toggled == 0 {
+        let lo_step = vib_lo_step;
+        let c = carry(vib_out_lo, lo_step);
+        vib_out_lo += lo_step;
+        sid[ofs + FREQ_LO] := vib_out_lo;
+        vib_out_hi += vib_hi_step + u8(c);
+        sid[ofs + FREQ_HI] := vib_out_hi;
+        return;
+      }
+    }
+    sid[ofs + FREQ_LO] := freq_lo_w;
+    sid[ofs + FREQ_HI] := freq_hi_w;
+  }
+}
+
+schedule {
+  clock;
+  if clock.row {
+    voice[0];
+    voice[1];
+    voice[2];
+  } else {
+    for v in L.output_voices {
+      voice[v];
+    }
+  }
+}
+
+// Each call either counts the divider down or reloads it.
+invariant tempo_steps: tempo == old(tempo) - 1 || tempo == old(tempo_reload);
