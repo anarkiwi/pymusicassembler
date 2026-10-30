@@ -4,14 +4,17 @@
 ``layout`` from :mod:`pymusicassembler.layout` discovery plus the three cells the
 play code fixes in zero page and its self-modified pitch operand. A build whose
 order step calls a rip's own routine runs ``specs/musicassembler_hook.play``, the
-variant that hands the byte to that routine (:func:`bind`).
+variant that hands the byte to that routine; :func:`bind` states that routine as
+spec statements when it can, so the call needs no machine code.
 """
 
 import dataclasses
 from importlib import resources
 
 from pysidtracker import CodePattern, SidImage, find_code_all
+from pysidtracker.errors import SidError
 from pysidtracker.playspec import load
+from pysidtracker.playspec.unnative import unnative
 
 from pymusicassembler import layout
 
@@ -55,10 +58,18 @@ def binding(view, entry):
 
 def bind(view, entry):
     """``(spec, binding)`` of the instance at ``entry``: the hook variant when its
-    order step calls a rip's routine, the base spec otherwise."""
+    order step calls a rip's routine, the base spec otherwise.
+
+    The hook variant has the rip's routine lifted to spec statements
+    (``unnative``); a routine the spec cannot state (it reads registers it was not
+    handed, the stack or code) stays a ``native`` call run on the CPU.
+    """
     found = binding(view, entry)
     if found["order_native"]:
-        return HOOK_SPEC, found
+        try:
+            return unnative(HOOK_SPEC, found, bytes(view)), found
+        except SidError:
+            return HOOK_SPEC, found
     found.pop("order_native")
     found.pop("order_resume")
     return SPEC, found

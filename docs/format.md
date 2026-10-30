@@ -286,6 +286,8 @@ returns, and leaves the rest of the call to the CPU if it does not. That build
 runs the variant
 [`specs/musicassembler_hook.play`](../src/pymusicassembler/specs/musicassembler_hook.play),
 which overrides the base's `order_wrap` proc; `playspec.bind` chooses it.
+`bind` lifts the routine to spec statements with `unnative` (z3) and keeps the
+`native` call only for a routine it cannot state.
 `pysidtracker playspec unnative` states the rip's routine as spec statements in
 a further variant of it. Each
 stream is validated under the orderlist rule the layout selects.
