@@ -65,11 +65,7 @@ jobs:
           sidtrace: "true"
           tunes: tests/test_oracle_hvsc.py tests/test_oracle_songs.py tests/fixtures/pathdiff.json
       - name: DIAG
-        run: |
-          git fetch -q --depth=1 origin 1309bd8f09c9dd74ae4eceff5f8f47f8c1116406
-          git worktree add /tmp/old 1309bd8f09c9dd74ae4eceff5f8f47f8c1116406
-          PYTHONPATH=scripts python scripts/diag_digimix.py new
-          PYTHONPATH=scripts:/tmp/old/src python scripts/diag_digimix.py old
+        run: PYTHONPATH=scripts python scripts/diag_digimix.py
 
   build:
     runs-on: ubuntu-latest
