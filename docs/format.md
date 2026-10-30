@@ -282,7 +282,12 @@ cleared after the orderlist step, and the control byte is read again after
 `dur_note` is stored. A rip that replaces the orderlist step's end-marker compare with a
 `JMP` to its own routine (Project Argus End) is run on the CPU: the spec hands
 the routine the byte read and the voice with `native`, carries on where it
-returns, and leaves the rest of the call to the CPU if it does not. Each
+returns, and leaves the rest of the call to the CPU if it does not. That build
+runs the variant
+[`specs/musicassembler_hook.play`](../src/pymusicassembler/specs/musicassembler_hook.play),
+which overrides the base's `order_wrap` proc; `playspec.bind` chooses it.
+`pysidtracker playspec unnative` states the rip's routine as spec statements in
+a further variant of it. Each
 stream is validated under the orderlist rule the layout selects.
 
 `Player(song)` exposes `.play_frame() -> list[(reg, val)]` and `.regs`;

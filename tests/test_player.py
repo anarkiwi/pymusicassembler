@@ -10,6 +10,7 @@ import pytest
 
 from pysidtracker import CodePattern, SidImage, power_on_ram
 from pysidtracker.asm6502 import assemble
+from pysidtracker.playspec.unnative import equivalent, unnative
 from pymusicassembler import constants, playspec, reader
 from pymusicassembler.errors import MusicAssemblerParseError
 from pymusicassembler.player import Player, iter_frames, render_grid
@@ -830,3 +831,20 @@ def test_filter_is_written_to_its_own_sid_page(tune_path):
     sound(player, sweep_ctr=1)
     assert (rd(player, 0xD517), rd(player, 0xD616)) == (0xF0, 0x50)
     assert [rd(player, FREE + 0x215 + r) for r in range(4)] == shadow
+
+
+def test_a_rips_order_hook_stated_as_a_variant_plays_the_same(tune_path):
+    """``unnative`` states the hook's 6502 as spec statements and the stated variant
+    plays every frame as the hooked spec does."""
+    song = _native_order_hook(reader.read(tune_path))
+    hooked = Player(song)
+    found = playspec.binding(hooked.view(), hooked.entry)
+    stated = unnative(playspec.HOOK_SPEC, found, hooked.view())
+    assert "native" not in stated.sources[stated.name]
+
+    def make(spec):
+        return Player(
+            song, bind=lambda view, entry: (spec, playspec.binding(view, entry))
+        )
+
+    equivalent(make, playspec.HOOK_SPEC, stated, frames=60)
