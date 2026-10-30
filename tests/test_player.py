@@ -453,8 +453,10 @@ def test_player_under_a_banked_out_rom_is_modelled(tune_path):
     assert player.memory[0xE021 : 0xE021 + len(body)] == body
 
 
+# A PSID with play 0 is hosted on pysidtracker's psiddrv, which leaves the idle
+# loop's banking ($37) rather than the init's.
 @pytest.mark.parametrize(
-    "magic, play, bits", [(b"PSID", None, 7), (b"RSID", None, 6), (b"PSID", 0, 6)]
+    "magic, play, bits", [(b"PSID", None, 7), (b"RSID", None, 6), (b"PSID", 0, 7)]
 )
 def test_play_banks_the_cpu_port_as_psiddrv(tune_path, magic, play, bits):
     """psiddrv banks ``$01`` for play only for a PSID with a play address."""

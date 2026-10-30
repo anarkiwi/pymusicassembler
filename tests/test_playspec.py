@@ -26,7 +26,11 @@ def assert_memory_equals_the_6502(data):
     routine's. A resonance stored to a SID mirror (Crumb's ``$D430``, which the
     layout folds to ``$D410``) is not a register of the CPU run's, so its
     voice-3 register is not compared."""
-    song = parse(data)
+    assert_song_equals_the_6502(parse(data), song_frames(data, None))
+
+
+def assert_song_equals_the_6502(song, frames):
+    """:func:`assert_memory_equals_the_6502` over ``frames`` calls of ``song``."""
     spec = Player(song)
     folded = spec.layout.res_sta - spec.layout.sid
     skip = folded if folded < FILTER_REGS else None
@@ -37,7 +41,7 @@ def assert_memory_equals_the_6502(data):
         song.play_addr,
         max_cycles=MAX_CYCLES,
     )
-    for frame in range(song_frames(data, None)):
+    for frame in range(frames):
         spec.play_frame()
         cpu.play_frame()
         for reg, (mine, real) in enumerate(zip(spec.regs, cpu.regs)):

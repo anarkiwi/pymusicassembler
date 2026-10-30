@@ -14,10 +14,7 @@ raises as the oracle is.
 from typing import List, Optional
 
 from pysidtracker import PSID_MAGIC, RSID_MAGIC, SidParseError, parse_sid_header
-from pysidtracker import psid_init_bank, psid_play_bank, run_to_rts, set_iomap
-from pysidtracker import wire_mpu
 from pysidtracker.irqhost import InterruptPlayer
-from pysidtracker.oracle import PAL_FLAG
 from pysidtracker.playspec import SpecPlayer
 from pysidtracker.registers import sid_model_for_flags
 
@@ -43,17 +40,14 @@ class Player(SpecPlayer):
         self._song = song
         self._subtune = subtune
         self._layouts = {}
-        self._hosted: Optional[InterruptPlayer] = None
         sid = song.container_header[:4] in (PSID_MAGIC, RSID_MAGIC)
         header = parse_sid_header(song.container_header) if sid else None
-        if header is not None and not song.play_addr:
-            self._hosted = InterruptPlayer(song.container_header + song.image, subtune)
         super().__init__(
             playspec.SPEC,
             song.image,
             song.load_addr,
             song.init_addr,
-            song.play_addr or song.init_addr,
+            song.play_addr,
             subtune,
             bind=bind,
             validate=validate,
@@ -62,26 +56,33 @@ class Player(SpecPlayer):
             max_cycles=MAX_CYCLES,
             sid_model=sid_model_for_flags(header.flags) if header else "6581",
             ntsc=bool(header and header.is_ntsc),
+            sid=song.container_header + song.image if header else None,
         )
 
-    def _init(self, subtune: int) -> None:
-        """Run init as psiddrv does, banking ``$01`` only where it would.
+    def _host(self, subtune: int) -> None:
+        """Boot the tune's interrupts on its own 6502, with no entry trapped.
 
-        An RSID tune boots under ``$37`` and, like a PSID whose init installs
-        its own interrupt (play 0), plays under the banking its init left
-        (``psiddrv::iomap`` 0).
+        A play call run as the spec is an instant, so an NMI digi beside the music
+        would sample at other cycles than on the machine; the tune's own code
+        keeps the oracle's timing. The layout is bound to the entry its vectors
+        reach (:meth:`_probe`).
         """
-        if self._pal_flag is not None:
-            self._mem[PAL_FLAG] = self._pal_flag
-        self._mem[1] = psid_init_bank(self._init_addr) if self._psid else 0x37
-        self._mpu, self._obs = wire_mpu(self._mem, self._illegal, self._sid_model)
-        run_to_rts(self._mpu, self._obs, self._init_addr, subtune, self._max_cycles)
-        if self._psid and self._song.play_addr:
-            set_iomap(self._mpu, psid_play_bank(self._play_addr))
-        self._due = self._mpu.processorCycles
-        self._bus = self._obs._subject  # pylint: disable=protected-access
-        play = self._play_addr
-        self.entry = play if play in self._entries() else self._probe(play)
+        if self._sid is None:
+            super()._host(subtune)
+            return
+        self._hosted = InterruptPlayer(self._sid, subtune, clock=self._clock)
+        machine = self._hosted.host.machine
+        self._mpu = machine.mpu
+        self._obs = self._bus = machine
+
+    def _init(self, subtune: int) -> None:
+        """Boot the tune (hosting its interrupts when play is 0), then bind its layout."""
+        try:
+            super()._init(subtune)
+        except SidParseError as exc:
+            raise MusicAssemblerParseError(str(exc)) from exc
+        if self.entry is None:  # hosted: the entry its interrupts reach
+            self.entry = self._probe(self._play_addr)
         self.layout = self._entry_layout(subtune)
 
     def _entry_layout(self, subtune: int) -> layout.Layout:
@@ -132,25 +133,10 @@ class Player(SpecPlayer):
             raise MusicAssemblerParseError("no play entry after init")
         return found
 
-    def _frame(self) -> None:
-        if self._hosted is not None:
-            self._hosted.play_frame()
-        elif not self._song.play_addr:
-            self._run(self.entry)
-        else:
-            super()._frame()
-
-    def snapshot(self) -> List[int]:
-        if self._hosted is None:
-            return super().snapshot()
-        return self._hosted.snapshot()
-
     def render_grid(self, nframes: int) -> List[List[int]]:
         """``nframes`` rows; a hosted tune's are framed at its play source's raises."""
-        if self._hosted is None:
-            return super().render_grid(nframes)
         try:
-            return self._hosted.render_grid(nframes)
+            return super().render_grid(nframes)
         except SidParseError as exc:
             raise MusicAssemblerParseError(str(exc)) from exc
 

@@ -30,6 +30,24 @@ PSID, image-loads-at-base, relocated player, native self-start song), all
 byte-exact over their whole song length, plus one tune per player feature over
 its whole song (`tests/test_oracle_songs.py`). See the table in [format.md](format.md#byte-exact-verdict).
 
+## Synthetic songs
+
+[`tests/synthetic.py`](../tests/synthetic.py) builds a song over the standard
+`$1021` player of 3LUX Intro whose patterns, orderlists, instruments and
+arpeggio programs are all its own, chosen to reach the play-routine paths the
+HVSC tunes leave untaken (vibrato, both filter forms, tied notes, every pulse
+mode, arpeggios through a carry and a borrow, filter rows in instrument
+programs, the silence terminator). `tests/test_synthetic.py` plays it for
+1200 calls on the spec and on the tune's own 6502 and compares the SID
+registers and RAM every call, then runs the 6502 under
+[`jennings.coverage`](https://github.com/anarkiwi/jennings/blob/main/docs/coverage.md)
+and requires every instruction reachable from init and play, and both
+directions of every branch, to have run. The six that cannot (a branch whose
+direction the preceding instruction fixes, and the fill after it) are listed
+with their reason in the test, so a new gap or a newly reachable path fails it.
+Later builds (orderlist tempo/jump, program jump) have other code and are
+covered by their tunes.
+
 ## HVSC oracle survey
 
 [`scripts/oracle_hvsc.py`](../scripts/oracle_hvsc.py) plugs `Player` into the
