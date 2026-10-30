@@ -97,6 +97,7 @@ def _spec(tune: Tune) -> SpecBinding:
         entries=playspec.entries,
         subtune=tune.subtune,
         psid=header is None or header.is_psid,
+        sid=song.container_header + song.image if header else None,
     )
 
 

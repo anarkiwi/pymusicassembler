@@ -1,7 +1,10 @@
 """``SidFormat.spec``: the registered playspec and its standard note table."""
 
+from dataclasses import replace
+
 import pytest
 
+from pysidtracker import parse_sid_header
 from pysidtracker.errors import SidError
 from pysidtracker.notes import frequency
 
@@ -14,6 +17,7 @@ from .test_player import _native_order_hook
 
 # pylint: disable=protected-access
 CLOCK = constants.PAL_CLOCK_HZ
+NTSC_CLOCK = 1022727
 FRAMES = 60
 FREE = 0xC000
 NOTE_BASE = 0
@@ -149,3 +153,34 @@ def test_native_predicate_tells_the_hook_build_from_the_base_spec(
 
     monkeypatch.setattr(playspec, "unnative", refuse)
     assert playspec.has_native(MUSIC_ASSEMBLER.spec(Tune(song)).spec)
+
+
+def _with_clock(song, clock):
+    """``song`` whose PSID header says ``clock`` (1 PAL, 2 NTSC)."""
+    head = bytearray(song.container_header)
+    flags = int.from_bytes(head[0x76:0x78], "big") & ~0xC | clock << 2
+    head[0x76:0x78] = flags.to_bytes(2, "big")
+    return replace(song, container_header=bytes(head))
+
+
+def test_spec_sid_is_the_tunes_own_container(tune_path):
+    song = reader.read(tune_path)
+    binding = MUSIC_ASSEMBLER.spec(Tune(song))
+    assert binding.sid == tune_path.read_bytes()
+    assert not MUSIC_ASSEMBLER.spec(Tune(replace(song, container_header=b""))).sid
+
+
+@pytest.mark.parametrize("clock, hz", [(1, CLOCK), (2, NTSC_CLOCK)])
+def test_standard_notes_follow_the_header_clock(tune_path, clock, hz):
+    song = _with_clock(reader.read(tune_path), clock)
+    assert parse_sid_header(song.container_header).is_ntsc == (clock == 2)
+    player = MUSIC_ASSEMBLER.spec_player(Tune(song), notes=True)
+    lo_hi = _note_words(player, 37, 0)
+    assert _word(lo_hi[:2]) == frequency(lo_hi[2], hz)
+
+
+def test_spec_player_without_a_header_plays_pal(tune_path):
+    song = replace(reader.read(tune_path), container_header=b"")
+    player = MUSIC_ASSEMBLER.spec_player(Tune(song), notes=True)
+    lo_hi = _note_words(player, 37, 0)
+    assert _word(lo_hi[:2]) == frequency(lo_hi[2], CLOCK)
