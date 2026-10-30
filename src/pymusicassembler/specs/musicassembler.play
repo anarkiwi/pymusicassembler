@@ -44,8 +44,8 @@ const AD = 5;
 const SR = 6;
 
 // Song data the player only reads: tables and split pointer tables.
-cell freq_lo: u8[128] @ L.freq_lo ro;
-cell freq_hi: u8[128] @ L.freq_hi ro;
+cell freq_lo: u8[128] @ L.freq_lo ro notes(lo, 0);
+cell freq_hi: u8[128] @ L.freq_hi ro notes(hi, 0);
 cell pattern: ptr[256] @ (L.pattern_lo, L.pattern_hi) ro;
 cell order: ptr[3] @ (L.order_lo, L.order_hi) ro;
 cell inner: ptr[16] @ (L.inner_lo, L.inner_hi) ro;

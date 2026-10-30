@@ -10,11 +10,13 @@ its ``build``, ``native`` and ``grammar`` probes are the rebuilt image, editor
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Iterable, NamedTuple, Optional, Sequence
 
-from pysidtracker import SidFormat
+from pysidtracker import PSID_MAGIC, RSID_MAGIC, SidFormat, parse_sid_header
+from pysidtracker.formats import SpecBinding
 
-from pymusicassembler import grammar, native, writer
+from pymusicassembler import grammar, native, playspec, writer
 from pymusicassembler.model import Song
 from pymusicassembler.player import Player
 from pymusicassembler.reader import MusicAssemblerSidParser, parse
@@ -73,6 +75,31 @@ def _listing(tune: Tune) -> tuple:
     return tuple(MUSIC_ASSEMBLER.listing(tune))
 
 
+def _spec(tune: Tune) -> SpecBinding:
+    """The playspec of ``tune``'s own image: the variant :func:`playspec.bind`
+    chooses for the instance its init leaves (``playspec.has_native`` tells whether
+    it still holds a ``native`` hook)."""
+    song = tune.song
+    booted = Player(song, subtune=tune.subtune)
+    bound = lru_cache(maxsize=2)(playspec.bind)
+    spec, _ = bound(booted.view(), booted.entry)
+
+    def bind(view, entry):
+        chosen, found = bound(view, entry)
+        return chosen, dict(found)
+
+    sid = song.container_header[:4] in (PSID_MAGIC, RSID_MAGIC)
+    header = parse_sid_header(song.container_header) if sid else None
+    return SpecBinding(
+        spec=spec,
+        bind=bind,
+        image=song.image,
+        entries=playspec.entries,
+        subtune=tune.subtune,
+        psid=header is None or header.is_psid,
+    )
+
+
 MUSIC_ASSEMBLER = SidFormat(
     name="musicassembler",
     parser=MusicAssemblerTuneParser(),
@@ -82,4 +109,5 @@ MUSIC_ASSEMBLER = SidFormat(
     probes={"build": _build, "native": _native, "grammar": _listing},
     grammar=grammar.GRAMMAR,
     streams=_streams,
+    spec=_spec,
 )
