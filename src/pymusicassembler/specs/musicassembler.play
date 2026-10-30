@@ -17,8 +17,8 @@ layout {
   arp_phase_rd, arp_down_src, arp_down_step, arp_down_dst, arp_down_hi,
   arp_up_src, arp_up_step, arp_up_dst, arp_up_hi, arp_substep_inc, arp_speed,
   arp_substep_cmp, arp_substep_clr, arp_phase_inc, inner_lo, inner_hi, sid,
-  res_sta, fc_sid, order_jump, program_jump, pw_substep_cmp, order_native,
-  order_resume, zp_ptr, zp_tmp, pitch_op: addr;
+  res_sta, fc_sid, order_jump, program_jump, pw_substep_cmp,
+  zp_ptr, zp_tmp, pitch_op: addr;
   pitch_skip, order_end, order_restart: byte;
   arp_down_cmp, pulse_always, pulse_cmp_adc: flag;
   order_tempo, output_voices: list;
@@ -264,6 +264,13 @@ machine voice[x in 0..3] {
     pat_cursor := 0;
   }
 
+  // The end marker: restart the orderlist.
+  proc order_wrap(ord: stream) {
+    if ord[0] == L.order_end {
+      ord.pos := L.order_restart;
+    }
+  }
+
   // The orderlist step: tempo/jump commands, the end marker and restart.
   proc order_step() {
     zp_ptr := order[x];
@@ -284,11 +291,7 @@ machine voice[x in 0..3] {
         order_jump := ord.pos;
       }
     }
-    if L.order_native != 0 {
-      native L.order_native(a = ord[0], x = x, y = ord.pos) resumes L.order_resume;
-    } elif ord[0] == L.order_end {
-      ord.pos := L.order_restart;
-    }
+    order_wrap(ord);
     order_cursor := ord.pos;
     pattern_id := ord[0];
     let tr = ord[1];

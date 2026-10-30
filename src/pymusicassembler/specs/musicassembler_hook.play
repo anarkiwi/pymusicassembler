@@ -1,0 +1,9 @@
+spec musicassembler_hook extends musicassembler;
+
+layout { order_native, order_resume: addr; }
+
+extend machine voice {
+  override proc order_wrap(ord: stream) {
+    native L.order_native(a = ord[0], x = x, y = ord.pos) resumes L.order_resume;
+  }
+}

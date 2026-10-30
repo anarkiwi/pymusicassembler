@@ -35,7 +35,7 @@ class Player(SpecPlayer):
     """
 
     def __init__(
-        self, song: Song, subtune: int = 0, bind=playspec.binding, validate=False
+        self, song: Song, subtune: int = 0, bind=playspec.bind, validate=False
     ):
         self._song = song
         self._subtune = subtune
