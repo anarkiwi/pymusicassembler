@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymusicassembler"
-version = "0.9.0"
+version = "0.10.0"
 description = "Pure-Python reader, writer, and player for Music Assembler SID songs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,7 +28,7 @@ dependencies = ["lark>=1.2", "pysidtracker>=0.44.0"]
 dev = [
     "black>=24",
     "pylint>=3",
-    "pysidtracker[survey]>=0.44.0",
+    "pysidtracker[survey]>=0.46.0",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",
