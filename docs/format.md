@@ -200,8 +200,10 @@ the build's commands from the discovered layout:
   `$FF` (restart) or `$FE` (stop). A non-zero cutoff replaces the filter
   sweep's cutoff accumulator. A `$FD r` ends the program only on builds whose
   player tests for it; elsewhere it is waveform data. It continues at byte
-  `3r`: `r = 0`, or `r` at least the marker's byte offset, restarts the
-  program, and `r` from the row count on runs into the bytes past it.
+  `3r`: `r = 0`, or `r` at least three more than the build's bound cell
+  (`Layout.program_jump`, read per voice), restarts the program, whatever the
+  program's length, so a smaller `r` past the row count runs into the bytes
+  past the program.
 
 `grammar.check(song, layout)`, run by `build` and `build_native`, refuses a
 stream whose bytes the player would read back differently (a row-start `$FF`
@@ -246,8 +248,8 @@ the `sidtrace` oracle. Facts a naive read of the Ghidra decompile
 - **The bare-duration token (`$60–$7F`) DOES advance the pattern cursor** (the
   `$10c3` `JMP $1187`); the decompile's inlining made it look like an early
   return.
-- **Init does not clear most work RAM.** It zeroes `$1081–$1090` and the
-  filter-owner immediate, and reloads pattern id / transpose / repeat; every
+- **Init does not clear most work RAM.** It rewrites `$1081–$1090`, the
+  filter-owner immediate and the per-voice transpose and repeat cells; every
   other work byte keeps its loaded-image value. The player therefore runs the
   tune's own init in the emulator and keeps all of its state in that memory.
 - **The filter owner is also the trigger-reset voice.** A filter command stores
