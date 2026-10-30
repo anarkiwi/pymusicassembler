@@ -1,19 +1,6 @@
 [
   {
     "compare": "lead",
-    "frames": 3130,
-    "id": "7574ce5b94ae",
-    "key": "('first', '6502:edge:12c37575af2fbdf351105b43', '')",
-    "kind": "first",
-    "left": "6502",
-    "md5": "d04e3a08efecdd74bda19f34ec2393e3",
-    "reason": "$132D BEQ $1343 -> $1343: reference frame 3121, register $02 v1_pw_lo",
-    "relpath": "MUSICIANS/T/Trident/Mindbender.sid",
-    "right": "format:musicassembler",
-    "song": 1
-  },
-  {
-    "compare": "lead",
     "frames": 9897,
     "id": "9fa900e38eb3",
     "key": "('first', '', 'musicassembler:edge:pymusicassembler/player.py:Player._frame:156>159')",
