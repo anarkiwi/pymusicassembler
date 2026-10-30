@@ -277,7 +277,11 @@ binds the spec's `layout` from `layout.discover` plus the zero-page pointer and
 temporary and the program's pitch operand read from the code. Where tables alias,
 the spec orders its reads and stores as the 6502 does: the pattern cursor is
 cleared after the orderlist step, and the control byte is read again after
-`dur_note` is stored.
+`dur_note` is stored. A rip that replaces the orderlist step's end-marker compare with a
+`JMP` to its own routine (Project Argus End) is run on the CPU: the spec hands
+the routine the byte read and the voice with `native`, carries on where it
+returns, and leaves the rest of the call to the CPU if it does not. Each
+stream is validated under the orderlist rule the layout selects.
 
 `Player(song)` exposes `.play_frame() -> list[(reg, val)]` and `.regs`;
 `iter_frames(song, max_frames)` yields per-frame writes; `render_grid(song,

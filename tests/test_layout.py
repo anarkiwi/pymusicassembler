@@ -238,6 +238,27 @@ def test_resonance_store_lands_on_the_register_it_aliases(tune_path, lo, res_sta
     assert layout.discover(image, entry).res_sta == res_sta
 
 
+def test_a_rips_own_order_hook_is_found_with_its_resume_address(tune_path):
+    """A rip that replaces the step's end-marker compare with a ``JMP`` to its own
+    routine names that routine, and the code after the compare it replaced."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    found = Player(reader.parse(tune_path.read_bytes())).layout
+    if found.variant.entries["order_step"].value != "plain":
+        pytest.skip("this build's step calls the order hook")
+    entry = found.entry
+    at = image.find_code(CodePattern("C8 B1 ?? C9 ?? D0 02 A0 ??"), start=entry)
+    for i, byte in enumerate((0x4C, 0x34, 0x12, 0xEA)):
+        image.poke(at.addr + 3 + i, byte)
+    lay = layout.discover(image, entry)
+    assert (lay.order_native, lay.order_resume) == (0x1234, at.addr + 9)
+    assert lay.variant.entries["order_step"].value == "native"
+
+
+def test_a_standard_step_has_no_order_hook(tune_path):
+    lay = Player(reader.read(tune_path)).layout
+    assert (lay.order_native, lay.order_resume) == (0, 0)
+
+
 def test_pulse_sweep_names_its_standard_cells(tune_path):
     """A standard build's sweep compares the cell it counts in, against ``AND #$0F``."""
     lay = Player(reader.read(tune_path)).layout

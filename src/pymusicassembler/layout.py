@@ -138,6 +138,9 @@ _ORDER_STEPS = tuple(
         ),
     )
 )
+# A rip's own routine in place of the step's end-marker compare: it takes the byte
+# and the voice and ``JMP``s back to the code after the compare it replaced.
+ORDER_NATIVE = CodePattern("C8 B1 ?? 4C {hook:w} EA A0 ??")
 ORDER_HOOK = CodePattern("C8 B1 ?? C9 FD F0 01 60 C8 B1 ?? 0A 9D {order_jump:w} A8")
 
 # The program routine's ``$FD r`` jump, at its marker compare: bounds ``r`` by
@@ -270,6 +273,8 @@ class Layout:
     order_restart: int = 0
     program_jump: int = 0
     pulse_always: bool = False
+    order_native: int = 0
+    order_resume: int = 0
     pw_substep_cmp: int = 0
     pulse_cmp_adc: bool = False
     output_voices: Tuple[int, ...] = (0, 1, 2)
@@ -422,6 +427,14 @@ def _order_step(image: SidImage, addr: int) -> Tuple[dict, dict]:
             if hook is not None:
                 found["order_jump"] = hook.captures["order_jump"]
                 entries["order_jump"] = Entry(True, detected(hook_addr))
+        return found, entries
+    hit = code_match_at(image, ORDER_NATIVE, addr)
+    if hit is not None:
+        entries["order_step"] = Entry("native", detected(addr))
+        found = {
+            "order_native": hit.captures["hook"],
+            "order_resume": addr + ORDER_NATIVE.length,
+        }
         return found, entries
     return {}, entries
 
