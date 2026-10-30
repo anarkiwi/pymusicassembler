@@ -51,7 +51,7 @@ Issues = "https://github.com/anarkiwi/pymusicassembler/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pymusicassembler = ["*.lark"]
+pymusicassembler = ["*.lark", "specs/*.play"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

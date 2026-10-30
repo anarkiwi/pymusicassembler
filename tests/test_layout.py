@@ -238,13 +238,36 @@ def test_resonance_store_lands_on_the_register_it_aliases(tune_path, lo, res_sta
     assert layout.discover(image, entry).res_sta == res_sta
 
 
+def test_pulse_sweep_names_its_standard_cells(tune_path):
+    """A standard build's sweep compares the cell it counts in, against ``AND #$0F``."""
+    lay = Player(reader.read(tune_path)).layout
+    assert lay.pw_substep_cmp == lay.pw_substep
+    assert not lay.pulse_cmp_adc
+
+
+@pytest.mark.parametrize("limit, adc", [(0x29, False), (0x69, True)])
+def test_pulse_sweep_reads_its_compare_operand_and_limit_opcode(tune_path, limit, adc):
+    """A rip may leave the compare's operand unrelocated or its limit an ``ADC``."""
+    image = SidImage.from_bytes(tune_path.read_bytes())
+    entry = Player(reader.parse(tune_path.read_bytes())).layout.entry
+    at = image.find_code(CodePattern("A5 ?? 29 0F DD ?? ??"), start=entry)
+    image.poke(at.addr + 2, limit)
+    image.poke(at.addr + 5, 0xE0)
+    image.poke(at.addr + 6, 0xA1)
+    lay = layout.discover(image, entry)
+    assert (lay.pw_substep_cmp, lay.pulse_cmp_adc) == (0xA1E0, adc)
+
+
 def test_arp_operands_name_the_standard_cells(tune_path):
     """A standard build's arpeggio code reads the cells the rest of the player uses."""
     player = Player(reader.read(tune_path))
     lay = player.layout
 
+    mem = player.memory
+
     def cell(name):
-        return player._indexed(getattr(lay, f"arp_{name}"), 0)
+        at = getattr(lay, f"arp_{name}")
+        return mem[at] | mem[at + 1] << 8
 
     assert {cell(n) for n in ("down_src", "down_dst", "up_src", "up_dst")} == {
         lay.freq_lo_w

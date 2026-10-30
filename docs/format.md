@@ -270,6 +270,15 @@ tune's play routine runs on the CPU, and every call into a player instance
 
 ## Player and playback notes
 
+The play call is [`specs/musicassembler.play`](../src/pymusicassembler/specs/musicassembler.play),
+a `pysidtracker.playspec` state machine over the tune's own memory, and `Player`
+is the `SpecPlayer` running it after the tune's init. `pymusicassembler.playspec`
+binds the spec's `layout` from `layout.discover` plus the zero-page pointer and
+temporary and the program's pitch operand read from the code. Where tables alias,
+the spec orders its reads and stores as the 6502 does: the pattern cursor is
+cleared after the orderlist step, and the control byte is read again after
+`dur_note` is stored.
+
 `Player(song)` exposes `.play_frame() -> list[(reg, val)]` and `.regs`;
 `iter_frames(song, max_frames)` yields per-frame writes; `render_grid(song,
 nframes)` returns the forward-filled 25-register grid. `iter_register_writes`

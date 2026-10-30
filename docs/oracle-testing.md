@@ -27,7 +27,7 @@ instead of masking a regression.
 
 One representative HVSC tune per supported player variation (standard `$1021`
 PSID, image-loads-at-base, relocated player, native self-start song), all
-byte-exact over their first 250 frames, plus one tune per player feature over
+byte-exact over their whole song length, plus one tune per player feature over
 its whole song (`tests/test_oracle_songs.py`). See the table in [format.md](format.md#byte-exact-verdict).
 
 ## HVSC oracle survey
@@ -108,3 +108,12 @@ export HVSC=/path/to/HVSC/C64Music          # optional; else fetched from a mirr
 docker pull anarkiwi/sidtrace:latest
 pytest -m oracle -n auto
 ```
+
+## Playspec proofs
+
+`tests/test_playspec.py` checks the spec against the tune's own 6502 run (the full
+64 KiB outside the stack page and the SID/IO window equal after every call), the
+streams it opens against the song grammar, and, marked `oracle`, a translation-
+validation proof that `voice[0].parse` equals the row reader of Space Invadarz on
+Vacation for all initial memory, and bounded checking of the tempo invariant. The
+proof takes about 13 minutes and runs in the oracle CI job.
