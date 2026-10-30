@@ -17,9 +17,10 @@ layout {
   arp_phase_rd, arp_down_src, arp_down_step, arp_down_dst, arp_down_hi,
   arp_up_src, arp_up_step, arp_up_dst, arp_up_hi, arp_substep_inc, arp_speed,
   arp_substep_cmp, arp_substep_clr, arp_phase_inc, inner_lo, inner_hi, sid,
-  res_sta, fc_sid, order_jump, program_jump, zp_ptr, zp_tmp, pitch_op: addr;
+  res_sta, fc_sid, order_jump, program_jump, pw_substep_cmp, zp_ptr, zp_tmp,
+  pitch_op: addr;
   pitch_skip, order_end, order_restart: byte;
-  arp_down_cmp, pulse_always: flag;
+  arp_down_cmp, pulse_always, pulse_cmp_adc: flag;
   order_tempo, output_voices: list;
 }
 
@@ -150,6 +151,7 @@ machine voice[x in 0..3] {
   cell pw_lo: u8 @ L.pw_lo + x;
   cell pw_hi: u8 @ L.pw_hi + x;
   cell pw_substep: u8 @ L.pw_substep + x;
+  cell pw_limit: u8 @ L.pw_substep_cmp + x;
   cell pw_dir: u8 @ L.pw_dir + x;
   cell porta_ctr: u8 @ L.porta_ctr + x;
   cell flags: u8 @ zp(L.flags + x);
@@ -427,21 +429,28 @@ machine voice[x in 0..3] {
       pw_lo := zp_tmp + pw_lo;
       pw_hi := zp_tmp + pw_hi + u8(c);
     } elif flags & 0x20 != 0 {
+      let cy = false;
       if pw_dir != 0 {
         let c = carry(pw_lo, zp_tmp);
         pw_lo += zp_tmp;
         if c {
           pw_hi += 1;
         }
+        cy := c;
       } else {
         let b = pw_lo < zp_tmp;
         pw_lo -= zp_tmp;
         if b {
           pw_hi -= 1;
         }
+        cy := !b;
       }
       pw_substep += 1;
-      if zp_tmp & 0x0F == pw_substep {
+      let limit = zp_tmp & 0x0F;
+      if L.pulse_cmp_adc {
+        limit := zp_tmp + 0x0F + u8(cy);
+      }
+      if limit == pw_limit {
         pw_substep := 0;
         pw_dir ^= 1;
       }

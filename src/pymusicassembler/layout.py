@@ -146,6 +146,16 @@ PROGRAM_JUMP_CODE = CodePattern("C9 FD D0 ?? C8 BD {cell:w} 18 69 03 8D")
 
 PROGRAM_JUMP = constants.PROGRAM_JUMP
 
+# The pulse sweep at ``to_pulse_sweep``: the cell its substep compare reads (the
+# increment's own cell but for rips that left the operand unrelocated), and the
+# opcode of the compare's limit, ``AND #$0F`` or a build's ``ADC #$0F``.
+PULSE_SWEEP = CodePattern(
+    "B5 ?? 29 20 F0 ?? BD ?? ?? F0 ?? 18 BD ?? ?? 65 ?? 9D ?? ?? 90 ?? FE ?? ??"
+    " B0 ?? 38 BD ?? ?? E5 ?? 9D ?? ?? B0 03 DE ?? ?? FE {inc:w} A5 ?? {limit}"
+    " 0F DD {cmp:w} D0"
+)
+ADC_IMM = 0x69
+
 # The song-data tables the player reads through, by Layout field.
 TABLES = (
     "order_lo",
@@ -260,6 +270,8 @@ class Layout:
     order_restart: int = 0
     program_jump: int = 0
     pulse_always: bool = False
+    pw_substep_cmp: int = 0
+    pulse_cmp_adc: bool = False
     output_voices: Tuple[int, ...] = (0, 1, 2)
     variant: Optional[Variant] = field(default=None, compare=False, repr=False)
 
@@ -453,6 +465,12 @@ def discover(mem, entry: int, start: int = 0, end: int = 0x10000) -> Layout:
     found["program_jump"] = hit.captures["cell"] if hit else 0
     entries["program_jump"] = Entry(
         bool(hit), detected(hit.addr) if hit else DEFAULT_SOURCE
+    )
+    sweep = code_match_at(image, PULSE_SWEEP, found["to_pulse_sweep"])
+    found["pw_substep_cmp"] = sweep.captures["cmp"] if sweep else found["pw_substep"]
+    found["pulse_cmp_adc"] = bool(sweep) and sweep.captures["limit"] == ADC_IMM
+    entries["pulse_sweep"] = Entry(
+        bool(sweep), detected(sweep.addr) if sweep else DEFAULT_SOURCE
     )
     for hit in find_code_all(image, TRANSREP_BYTE, start=start, end=end):
         if hit.captures["repeat"] == found["repeat"]:

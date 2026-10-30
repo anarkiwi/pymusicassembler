@@ -542,6 +542,37 @@ def test_pulse_always_adds_the_step(tune_path, always, expect):
     assert rd(player, lay.pw_lo) | rd(player, lay.pw_hi) << 8 == expect
 
 
+@pytest.mark.parametrize("limit,toggles", [(0x03, True), (0x04, False)])
+def test_pulse_sweep_compares_against_its_own_cell(tune_path, limit, toggles):
+    """A rip's unrelocated compare operand names the cell the substep is checked
+    against, not the cell it counts in."""
+    player = variant(reader.read(tune_path), pw_substep_cmp=FREE)
+    lay = player.layout
+    wr(player, lay.instr + RECORD + constants.INSTR_PULSE_STEP, 0x03)
+    wr(player, FREE, limit)
+    wr(player, lay.pw_dir, 0)
+    wr(player, lay.pw_substep, 0)
+    sound(player, flags=0x20, x8=RECORD)
+    assert (rd(player, lay.pw_substep), rd(player, lay.pw_dir)) == (
+        (0, 1) if toggles else (1, 0)
+    )
+
+
+@pytest.mark.parametrize("pw_lo,toggles", [(0xF0, True), (0x10, False)])
+def test_adc_limit_adds_the_sweep_carry(tune_path, pw_lo, toggles):
+    """A build whose substep limit is ``ADC #$0F`` adds the carry the pulse-width
+    add left: it is checked after rising past a page boundary only."""
+    player = variant(reader.read(tune_path), pw_substep_cmp=FREE, pulse_cmp_adc=True)
+    lay = player.layout
+    wr(player, lay.instr + RECORD + constants.INSTR_PULSE_STEP, 0x20)
+    wr(player, FREE, 0x30)
+    wr(player, lay.pw_dir, 1)
+    wr(player, lay.pw_substep, 0)
+    wr(player, lay.pw_lo, pw_lo)
+    sound(player, flags=0x20, x8=RECORD)
+    assert rd(player, lay.pw_dir) == (0 if toggles else 1)
+
+
 def test_vibrato_steps_the_output_cells_not_the_note_start(tune_path):
     player = variant(reader.read(tune_path), vib_out_lo=FREE)
     lay = player.layout
