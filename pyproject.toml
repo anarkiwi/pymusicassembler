@@ -27,6 +27,8 @@ dependencies = ["lark>=1.2", "pysidtracker>=0.44.0"]
 [project.optional-dependencies]
 dev = [
     "black>=24",
+    # 6502 coverage of the play routine under the synthetic songs.
+    "jennings[coverage]>=0.4.0",
     "pylint>=3",
     "pysidtracker[survey]>=0.46.0",
     "pytest>=7",
