@@ -9,6 +9,7 @@ import pytest
 
 from jennings.coverage import EXEC, FALLTHRU, TAKEN, CoverageMap, CoverageVM
 from jennings.coverage.cfg import successors
+import jennings.memory
 from jennings.devices import mpu6502
 from jennings.isa import is_branch
 from pysidtracker.oracle import EmuPlayer
@@ -46,6 +47,7 @@ def test_synthetic_song_spec_equals_the_6502(song):
 
 def test_synthetic_song_runs_every_path_of_the_6502(song, monkeypatch):
     cov = CoverageMap()
+    monkeypatch.setattr(jennings.memory, "NATIVE", False)
     monkeypatch.setattr(
         mpu6502.MPU, "VM", staticmethod(lambda mem: CoverageVM(mem, cov))
     )

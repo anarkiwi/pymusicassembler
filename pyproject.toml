@@ -31,8 +31,6 @@ dev = [
     "jennings[coverage]>=0.4.0",
     "pylint>=3",
     "pysidtracker[survey]>=0.50.1",
-    # vagrant-moses 0.5 and later break the 6502 host the play-routine tests run on.
-    "vagrant-moses<0.5",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",
