@@ -1,7 +1,6 @@
 """Audio rendering via a fake SID device."""
 
-from array import array
-
+import numpy as np
 import pytest
 
 from pymusicassembler import audio, reader
@@ -9,17 +8,16 @@ from pymusicassembler.errors import MusicAssemblerError
 
 
 class _FakeSid:
-    """Minimal device: one sample per clock call, counts register writes."""
+    """Minimal device: one sample per run, counts register writes."""
+
+    sampling_hz = 44100
 
     def __init__(self):
-        self.sampling_frequency = 44100
         self.writes = 0
 
-    def write_register(self, reg, value):  # pylint: disable=unused-argument
-        self.writes += 1
-
-    def clock(self, _delta):
-        return array("h", [0])
+    def run(self, writes, until):  # pylint: disable=unused-argument
+        self.writes += len(writes)
+        return np.zeros(1, np.int16)
 
 
 def test_render_samples_with_fake_device(tune_path):

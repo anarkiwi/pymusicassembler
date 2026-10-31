@@ -111,7 +111,7 @@ pysidtracker snapshot diff .snapshots/before.json .snapshots/after.json
 - `iter_frames(song, max_frames)` — per-frame writes.
 - `render_grid(song, nframes) -> list[list[int]]` — forward-filled grid.
 - `render_samples` / `render_wav` / `write_wav` — audio via
-  `pysidtracker.audio.render_player_samples` (pyresidfp).
+  `pysidtracker.audio.render_player_samples` (pylibresidfp).
 - `iter_register_writes` / `read_reglog` / `write_reglog` / `RegWrite`.
 - Model: `Song`, `Orderlist`, `OrderEntry`, `Pattern`, `Instrument`,
   `PresetBank`, and the decoded pattern events `NoteEvent` / `InstrumentEvent`
