@@ -2,9 +2,10 @@
 
 Thin wrappers over :func:`pysidtracker.audio.render_player_samples` /
 :func:`~pysidtracker.audio.render_player_wav` driving a :class:`Player`; the
-default device is pyresidfp, built at the render's clock. Any object with
-``write_register(reg, value)``, ``clock(timedelta) -> samples`` and a
-``sampling_frequency`` attribute may be passed as ``device`` instead.
+default device is pylibresidfp, built at the render's clock. Any object with
+``run(writes, until) -> int16 samples`` (``writes`` an ``(N, 3)`` array of absolute
+``(cycle, reg, value)``) and a ``sampling_hz`` attribute may be passed as ``device``
+instead.
 """
 
 from pysidtracker.audio import (

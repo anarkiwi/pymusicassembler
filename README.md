@@ -23,7 +23,7 @@ emulator, so subtune selection and packed/relocating rips play as on a C64.
 ## Install
 
 ```bash
-pip install pymusicassembler   # reader/writer/player/reglog, song grammar (lark), WAV (pyresidfp)
+pip install pymusicassembler   # reader/writer/player/reglog, song grammar (lark), WAV (pylibresidfp)
 ```
 
 ## Usage

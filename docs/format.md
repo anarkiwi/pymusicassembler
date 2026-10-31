@@ -380,7 +380,7 @@ oracle comparison works.
   `docs/bytegrammar.md`).
 - [`sidtrace`](https://github.com/anarkiwi/sidtrace) — the `sidplayfp` register
   oracle the player is validated against.
-- [pyresidfp](https://pypi.org/project/pyresidfp/) — reSIDfp SID emulation
+- [pylibresidfp](https://pypi.org/project/pylibresidfp/) — libresidfp SID emulation
   (WAV render).
 - [`pysidtracker`](https://github.com/anarkiwi/pysidtracker) — shared
   container/image/detection base.
