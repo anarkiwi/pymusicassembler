@@ -69,9 +69,17 @@ pysidtracker snapshot diff .snapshots/before.json .snapshots/after.json
 ## Public API
 
 - `read(src, subtune=0) -> Song` / `parse(bytes, subtune=0) -> Song` — read a
-  `.sid`/`.prg`. A player found only after init is read from the memory init
-  leaves for 0-based `subtune` (a rip whose init selects a different player
-  per subtune decodes only the subtunes that select Music Assembler).
+  `.sid`/`.prg`. The orderlists, patterns, instruments, frequency tables and
+  inner programs are those the tune's init for 0-based `subtune` leaves in
+  memory: the orderlists the voices point at (a later subtune's init may
+  repoint them), the patterns those reach, and the programs the instruments
+  reach. A rip whose init selects a different player per subtune decodes only
+  the subtunes that select Music Assembler.
+- `Song.init_state -> InitState` — the memory after that init: `.memory` (64 KiB
+  as the CPU reads it), `.entry`, `.subtune`, `.found` (the playspec layout
+  binding), `.spec` (the bound playspec), `.cell(name, voice=0)` /
+  `.voices(name)` (a work cell the spec reads, such as `tempo`, `dur`,
+  `note_ctl`, `fc_acc`, `vib_lo_step`) and `.window(addr, size)`.
 - `read_presets(src) -> PresetBank` / `parse_presets(bytes)` — read the
   editor's `P.` preset bank (the 768-byte `$4300` body, with or without its
   load prefix).

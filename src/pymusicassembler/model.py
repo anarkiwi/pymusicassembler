@@ -1,7 +1,9 @@
 """Typed models: the Music Assembler song and the editor's P. preset bank."""
 
 from dataclasses import astuple, dataclass, field
-from typing import Any, List, Optional
+from functools import cached_property
+from types import MappingProxyType
+from typing import Any, List, Mapping, Optional, Tuple
 
 from pymusicassembler import constants
 from pymusicassembler.errors import MusicAssemblerError
@@ -282,6 +284,54 @@ class PresetBank:
         return cls(arpeggios=arpeggios, presets=presets)
 
 
+@dataclass(frozen=True, repr=False)
+class InitState:
+    """The player's memory as the tune's init for 0-based ``subtune`` left it.
+
+    ``memory`` is the 64 KiB the CPU reads, ``entry`` the play entry. The work
+    cells the playspec reads (tempo, durations, note control, the filter sweep,
+    vibrato steps, ...) are named by the spec's layout: :meth:`cell` and
+    :meth:`voices` read them, :attr:`found` is the layout binding and
+    :attr:`spec` the playspec bound to this instance.
+    """
+
+    subtune: int
+    memory: bytes
+    entry: int
+
+    def __repr__(self) -> str:
+        return f"InitState(subtune={self.subtune}, entry={self.entry:#06x})"
+
+    @cached_property
+    def _bound(self) -> tuple:
+        from pymusicassembler import playspec  # playspec imports the layout
+
+        spec, found = playspec.bind(self.memory, self.entry)
+        return spec, MappingProxyType(dict(found))
+
+    @property
+    def spec(self):
+        """The playspec (base or order-hook variant) bound to this instance."""
+        return self._bound[0]
+
+    @property
+    def found(self) -> Mapping[str, Any]:
+        """The spec's layout binding: cell addresses, flags and lists by name."""
+        return self._bound[1]
+
+    def cell(self, name: str, voice: int = 0) -> int:
+        """The byte of address cell ``name`` (its ``voice``'th, for per-voice cells)."""
+        return self.memory[self.found[name] + voice]
+
+    def voices(self, name: str) -> Tuple[int, ...]:
+        """Per-voice cell ``name`` for each of the song's voices."""
+        return tuple(self.cell(name, voice) for voice in range(constants.VOICES))
+
+    def window(self, addr: int, size: int) -> bytes:
+        """``size`` bytes at ``addr``, wrapping at the 64 KiB end."""
+        return bytes(self.memory[(addr + i) & 0xFFFF] for i in range(size))
+
+
 @dataclass
 class Song:
     """A complete Music Assembler song.
@@ -289,6 +339,9 @@ class Song:
     The load address, the three per-voice orderlists, the shared pattern
     pool, the 8-byte instruments, the note-frequency tables, and the 16
     arpeggio programs (a ``None`` slot = pointer-table placeholder here).
+    When parsed from a tune, the orderlists, patterns, instruments and programs
+    are those its init for the parsed subtune left in memory; ``init_state``
+    carries the rest of that memory.
     """
 
     # pylint: disable=too-many-instance-attributes  # a full tune is wide
@@ -318,6 +371,8 @@ class Song:
     layout: Any = field(default=None, repr=False, compare=False)
     layout_post_init: bool = field(default=False, repr=False, compare=False)
     layout_subtune: int = field(default=0, repr=False, compare=False)
+    # Memory after the tune's init for the parsed subtune (``None`` if never run).
+    init_state: Optional[InitState] = field(default=None, repr=False, compare=False)
 
     def apply_preset_bank(self, bank: PresetBank) -> None:
         """Swap in the bank's presets and arpeggios.

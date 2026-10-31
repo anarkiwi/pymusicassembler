@@ -11,6 +11,7 @@ from pymusicassembler.model import (
     Arpeggio,
     ArpeggioRow,
     DurationEvent,
+    InitState,
     Instrument,
     InstrumentEvent,
     NoteEvent,
@@ -43,12 +44,13 @@ from pymusicassembler.writer import (
     write_presets,
 )
 
-__version__ = "0.8.7"
+__version__ = "0.14.0"
 
 __all__ = [
     "Arpeggio",
     "ArpeggioRow",
     "DurationEvent",
+    "InitState",
     "Instrument",
     "InstrumentEvent",
     "MusicAssemblerError",

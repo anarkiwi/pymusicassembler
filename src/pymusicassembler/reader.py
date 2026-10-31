@@ -24,6 +24,7 @@ from pymusicassembler.player import Player
 from pymusicassembler.model import (
     Arpeggio,
     Instrument,
+    InitState,
     InstrumentEvent,
     Orderlist,
     Pattern,
@@ -153,9 +154,17 @@ def _referenced_pattern_ids(orderlists: List[Orderlist], commands=()) -> List[in
     return sorted({e.pattern_id for o in orderlists for e in o.entries} - skip)
 
 
-def _stored_pattern(img: SidImage, lay, pattern_id: int, referenced: bool):
+def _stored_pattern(
+    img: SidImage, lay, pattern_id: int, referenced: bool, extent: range
+):
     """``(Pattern, events)``, else ``(None, [])`` for an id no orderlist plays
-    whose pointer reaches no pattern (the player never reads it)."""
+    whose pointer reaches no pattern in the file's ``extent`` (the player never
+    reads it)."""
+    if (
+        not referenced
+        and img.ptr(lay.pattern_lo, lay.pattern_hi, pattern_id) not in extent
+    ):
+        return None, []
     try:
         return _decode_pattern(img, lay, pattern_id)
     except MusicAssemblerParseError:
@@ -192,6 +201,13 @@ def _stored_patterns(img: SidImage, lay: "layout.Layout", end: int) -> int:
     return count if all(lay.order_hi < ptr < end for ptr in ptrs) else 0
 
 
+def _record(img: SidImage, addr: int, end: int) -> Instrument:
+    """The instrument record at ``addr``; bytes at and past the file's ``end``
+    (0: no file extent) read as zero, as the file stores no more."""
+    room = min(constants.INSTR_RECORD_SIZE, (end or 0x10000) - addr)
+    return Instrument.from_bytes(img.window(addr, max(room, 0)))
+
+
 def _stored_instruments(lay: "layout.Layout", end: int, data: Iterable[int]) -> int:
     """Preset records an instrument table placed last holds, up to the next ``data``.
 
@@ -205,34 +221,60 @@ def _stored_instruments(lay: "layout.Layout", end: int, data: Iterable[int]) -> 
     return min(-(-(end - lay.instr) // size), constants.INSTR_COUNT)
 
 
-def _locate(image: bytes, load: int, init: Optional[int], play: int, subtune: int = 0):
-    """``(view, layout, post_init)``: the loaded image, else memory after init
-    of 0-based ``subtune``.
+def _locate(
+    image: bytes,
+    load: int,
+    init: Optional[int],
+    play: int,
+    subtune: int = 0,
+    header: bytes = b"",
+    boot: bool = False,
+):
+    """``(view, layout, post_init, player)``: the loaded image, else memory after
+    init of 0-based ``subtune``; with ``boot`` the memory after init always, with
+    the layout of the play entry that init leaves.
 
-    ``init`` ``None`` (a bare image) allows only the static view.
+    ``post_init`` is true when the loaded image's layout is not that one.
+    ``init`` ``None`` (a bare image) allows only the static view and boots no
+    ``player``.
     """
     img = load_view(image, load)
+    lay = None
     try:
-        return img, discover_layout(img, play, load, load + len(image)), False
+        lay = discover_layout(img, play, load, load + len(image))
     except MusicAssemblerParseError:
         if init is None:
             raise
-    song = Song(load_addr=load, init_addr=init, play_addr=play, image=image)
+    if init is None or (lay and not boot):
+        return img, lay, False, None
+    song = Song(
+        load_addr=load,
+        init_addr=init,
+        play_addr=play,
+        image=image,
+        container_header=header,
+    )
     player = Player(song, subtune)
-    return load_view(player.memory, 0), player.layout, True
+    post_init = lay != player.layout
+    return load_view(player.view(), 0), player.layout, post_init, player
 
 
 def parse(data: bytes, subtune: int = 0) -> Song:
     """Parse Music Assembler tune bytes (PSID/.sid or .prg) into a Song.
 
-    A player whose tables lie outside the loaded image is read after its init
-    runs in the emulator for 0-based ``subtune`` (packed or relocating rips,
-    or a rip whose init selects one of several players per subtune).
+    The tables are read from memory after the tune's init runs in the emulator
+    for 0-based ``subtune``: the orderlists the voices point at, the patterns
+    those reach and the instruments and programs in use, as that init left them
+    (a subtune's init may repoint the voices; packed or relocating rips and rips
+    whose init selects one of several players per subtune place their tables
+    there). :attr:`Song.init_state` holds that memory.
     """
     load, init, play, name, author, released, image, header = _parse_container(data)
     require_ram(load, len(image), "tune image", MusicAssemblerParseError)
     sid = data[:4] in (PSID_MAGIC, RSID_MAGIC)
-    img, lay, post_init = _locate(image, load, init if sid else None, play, subtune)
+    img, lay, post_init, player = _locate(
+        image, load, init if sid else None, play, subtune, header, boot=True
+    )
     if not sid:
         init, play = lay.init, lay.entry
 
@@ -241,11 +283,15 @@ def parse(data: bytes, subtune: int = 0) -> Song:
         parse_orderlist(img, lay, voice, rule) for voice in range(constants.VOICES)
     ]
 
-    end = load + len(image) if img.load == load else 0  # 0: no file extent
+    extent = range(load, load + len(image))
+    end = extent.stop if all(b in extent for b in lay.tables().values()) else 0
+    if not end:  # no file extent
+        extent = range(0x10000)
     pattern_ids = _referenced_pattern_ids(orderlists, grammar.COMMANDS[rule])
     npat = max([pid + 1 for pid in pattern_ids] + [_stored_patterns(img, lay, end)])
     decoded = [
-        _stored_pattern(img, lay, pid, pid in pattern_ids) for pid in range(npat)
+        _stored_pattern(img, lay, pid, pid in pattern_ids, extent)
+        for pid in range(npat)
     ]
     patterns = [pattern for pattern, _ in decoded]
 
@@ -270,14 +316,11 @@ def parse(data: bytes, subtune: int = 0) -> Song:
     instr_ids = _selected_instruments(events for _, events in decoded)
     ninstr = max([iid + 1 for iid in instr_ids] + [_stored_instruments(lay, end, data)])
     rec = constants.INSTR_RECORD_SIZE
-    instruments = [
-        Instrument.from_bytes(img.window(lay.instr + iid * rec, rec))
-        for iid in range(ninstr)
-    ]
+    instruments = [_record(img, lay.instr + iid * rec, end) for iid in range(ninstr)]
     freq_lo = list(img.window(lay.freq_lo, constants.FREQ_TABLE_LEN))
     freq_hi = list(img.window(lay.freq_hi, constants.FREQ_TABLE_LEN))
 
-    return Song(
+    song = Song(
         load_addr=load,
         init_addr=init,
         play_addr=play,
@@ -296,6 +339,9 @@ def parse(data: bytes, subtune: int = 0) -> Song:
         layout_post_init=post_init,
         layout_subtune=subtune,
     )
+    player = player or Player(song, subtune)
+    song.init_state = InitState(subtune, player.view(), player.entry)
+    return song
 
 
 def read(src, subtune: int = 0) -> Song:
