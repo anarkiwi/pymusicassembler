@@ -203,7 +203,9 @@ def _stored_patterns(img: SidImage, lay: "layout.Layout", end: int) -> int:
 
 def _record(img: SidImage, addr: int, end: int) -> Instrument:
     """The instrument record at ``addr``; bytes at and past the file's ``end``
-    (0: no file extent) read as zero, as the file stores no more."""
+    (0: no file extent) read as zero, as the file stores no more. A record a
+    pattern selects is read whole from the machine: the player reads the RAM
+    there, whatever the file stores."""
     room = min(constants.INSTR_RECORD_SIZE, (end or 0x10000) - addr)
     return Instrument.from_bytes(img.window(addr, max(room, 0)))
 
@@ -314,9 +316,13 @@ def parse(data: bytes, subtune: int = 0) -> Song:
         img.ptr(lay.order_lo, lay.order_hi, voice) for voice in range(constants.VOICES)
     ]
     instr_ids = _selected_instruments(events for _, events in decoded)
-    ninstr = max([iid + 1 for iid in instr_ids] + [_stored_instruments(lay, end, data)])
+    reached = max([iid + 1 for iid in instr_ids], default=0)
+    ninstr = max(reached, _stored_instruments(lay, end, data))
     rec = constants.INSTR_RECORD_SIZE
-    instruments = [_record(img, lay.instr + iid * rec, end) for iid in range(ninstr)]
+    instruments = [
+        _record(img, lay.instr + iid * rec, 0 if iid < reached else end)
+        for iid in range(ninstr)
+    ]
     freq_lo = list(img.window(lay.freq_lo, constants.FREQ_TABLE_LEN))
     freq_hi = list(img.window(lay.freq_hi, constants.FREQ_TABLE_LEN))
 

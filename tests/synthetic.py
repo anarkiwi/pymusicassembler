@@ -159,10 +159,12 @@ def _orderlist(entries, terminator):
     )
 
 
-def synthesize(base_data):
-    """The synthetic song over the player and layout of the PSID ``base_data``."""
+def synthesize(base_data, patterns=None):
+    """The synthetic song over the player and layout of the PSID ``base_data``,
+    with ``patterns`` (name to bytes) in place of :data:`PATTERNS`."""
+    patterns = patterns or PATTERNS
     song = parse(base_data)
-    for pid, data in enumerate(PATTERNS.values()):
+    for pid, data in enumerate(patterns.values()):
         song.patterns[pid] = Pattern(data)
     song.orderlists = [_orderlist(*order) for order in ORDERS]
     for i, instrument in INSTRUMENTS.items():
@@ -180,5 +182,5 @@ def synthesize(base_data):
         image=built.image,
     )
     again = parse(packed)
-    assert [p.data for p in again.patterns[: len(PATTERNS)]] == list(PATTERNS.values())
+    assert [p.data for p in again.patterns[: len(patterns)]] == list(patterns.values())
     return built

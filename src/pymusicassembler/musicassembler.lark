@@ -11,10 +11,12 @@
 // ---------------------------------------------------------------------------
 // Pattern: rows until an $FF at a row start. Every row sets a duration d (its
 // byte & $1F) and lasts d + 1 tempo ticks. The player reads a row before
-// testing for $FF, so for an empty pattern (a bare $FF) it plays the $FF as a
-// hold and walks on into the following bytes.
+// testing for $FF, so an empty pattern (a bare $FF) plays that $FF as a hold
+// (duration $1F) and walks on into the following bytes: its rows run to the
+// next row-start $FF.
 
-pattern: row* PATTERN_END _TAIL?
+pattern: row+ PATTERN_END _TAIL?
+       | PATTERN_END row* PATTERN_END _TAIL? -> read_on
 
 ?row: note | rest | hold | select
 

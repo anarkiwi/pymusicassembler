@@ -188,8 +188,10 @@ the build's commands from the discovered layout:
     a note or by a rest byte `$60-$FF`.
 
   Only a row-start `$FF` ends the pattern. The player reads a row before
-  testing for `$FF`, so it plays an empty pattern's lone `$FF` as a hold and
-  reads on.
+  testing for `$FF`, so it plays an empty pattern's lone `$FF` as a hold
+  (duration `$1F`) and reads on to the next row-start `$FF`. The grammar's
+  `read_on` alternative models that stream: `Pattern.data` starts with the
+  `$FF`, and `events()` leads with the hold, then the rows read on.
 - **Orderlist** — `(pattern_id, transpose << 4 | repeat)` entries ending in
   `$FF` (loop to the build's restart entry) or a single `$FE` (park on the
   silence pattern). The order-hook build ends a list on `$FD n` (jump to entry
@@ -222,7 +224,10 @@ voice, a shared pool of patterns and 16 arpeggio programs.
 - **Patterns** — the player bytecode of the `pattern` rule, stored without its
   `$FF`; `Pattern.events()` is its parsed rows.
 - **Instruments** — 8-byte records: attack/decay, sustain/release, waveform,
-  pulse-width init + sweep step, arp speed + step, porta/effect flags.
+  pulse-width init + sweep step, arp speed + step, porta/effect flags. Records
+  up to the highest instrument a pattern selects are the post-init memory the
+  player reads, including bytes past the file's end (the machine's RAM there);
+  a table's trailing records no pattern selects keep the file's extent.
 - **Arpeggios (inner programs)** — 16 slots indexed by the instrument flags
   low nibble; nibble 0 runs no program, so slot 0 never plays. The editor
   stores a tune's used programs packed back-to-back after the other tables,
