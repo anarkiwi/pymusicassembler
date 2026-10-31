@@ -86,6 +86,10 @@ class ToModel(Transformer):
         events = [event for row in rows[:-1] for event in row]
         return Parsed(events, rows[-1].end_pos)
 
+    def read_on(self, _, *rows):
+        hold = DurationEvent(constants.CTL_DUR_MASK, long=True)
+        return Parsed([hold] + self.pattern(*rows).model, rows[-1].end_pos)
+
     def note(self, pitch, control):
         return [NoteEvent(ord(pitch), *control)]
 

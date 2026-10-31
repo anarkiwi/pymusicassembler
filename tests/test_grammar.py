@@ -48,7 +48,12 @@ LATER = SimpleNamespace(order_tempo=0x1234, order_jump=0x1234, program_jump=0x12
         ((0x81, 0xA5, 0xFF), [InstrumentEvent(1), DurationEvent(5)], 3),
         ((0x81, 0x85, 0xFF), [InstrumentEvent(1), DurationEvent(5)], 3),
         ((0x81, 0xFF, 0xFF), [InstrumentEvent(1), DurationEvent(0x1F)], 3),
-        ((0xFF,), [], 1),
+        ((0xFF, 0xFF), [DurationEvent(0x1F, long=True)], 2),
+        (
+            (0xFF, 0x10, 0x05, 0x63, 0xFF),
+            [DurationEvent(0x1F, long=True), NoteEvent(0x10, 0x05), DurationEvent(3)],
+            5,
+        ),
     ],
 )
 def test_pattern_rows(data, events, size):
@@ -189,7 +194,11 @@ def test_render_follows_stream_order():
 @pytest.mark.parametrize(
     "data,rule,lines",
     [
-        ((0xFF, 0x01), grammar.PATTERN, ["pattern PATTERN_END=$ff"]),
+        (
+            (0xFF, 0xFF, 0x01),
+            grammar.PATTERN,
+            ["read_on PATTERN_END=$ff PATTERN_END=$ff"],
+        ),
         ((0xFF,), grammar.ORDERLIST, ["orderlist", "  loop ORDER_LOOP=$ff"]),
         (
             (0xFD, 0x02),
