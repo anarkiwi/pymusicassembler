@@ -7,14 +7,13 @@ name = "pymusicassembler"
 version = "0.16.0"
 description = "Pure-Python reader, writer, and player for Music Assembler SID songs"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Josh Bailey" }]
 keywords = ["sid", "c64", "music assembler", "tracker", "chiptune", "pylibresidfp"]
 classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Multimedia :: Sound/Audio",
@@ -22,15 +21,16 @@ classifiers = [
 # EmuPlayer boot, render_player_*, cadence_info and the media-aware
 # `fixtures fetch` back the player, audio, survey renderer and test fixtures.
 # lark (Transformer) builds the song-stream models under pysidtracker.bytegrammar.
-dependencies = ["lark>=1.2", "pysidtracker>=0.54.0"]
+dependencies = ["lark>=1.2", "pysidtracker>=0.63.0"]
 
 [project.optional-dependencies]
 dev = [
     "black>=24",
-    # 6502 coverage of the play routine under the synthetic songs.
-    "jennings[coverage]>=0.4.0",
+    # 6502 coverage of the play routine under the synthetic songs, and the
+    # assembler for the test hooks.
+    "jennings[coverage]>=0.12.0",
     "pylint>=3",
-    "pysidtracker[survey]>=0.54.0",
+    "pysidtracker[survey]>=0.63.0",
     "pytest>=7",
     "pytest-cov>=4",
     "pytest-xdist>=3",
@@ -73,7 +73,7 @@ show_missing = true
 
 [tool.black]
 line-length = 88
-target-version = ["py311"]
+target-version = ["py312"]
 
 [tool.pylint.main]
 disable = "all"

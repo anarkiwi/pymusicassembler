@@ -7,10 +7,11 @@ Byte-exact validation against the SID register oracle lives in
 """
 
 import pytest
+from jennings.assembler import Assembler
+from jennings.devices.mpu6502 import MPU
 
 from pysidtracker import CodePattern, SidImage, power_on_ram
 from pysidtracker.errors import SidError
-from pysidtracker.asm6502 import assemble
 from pysidtracker.playspec.unnative import equivalent, unnative
 from pymusicassembler import constants, playspec, reader
 from pymusicassembler.errors import MusicAssemblerParseError
@@ -212,7 +213,7 @@ def _native_order_hook(song):
     entry = found.entry
     step = image.find_code(CodePattern("C8 B1 ?? C9 ?? D0 02 A0 ??"), start=entry).addr
     hook = song.load_addr + len(song.image)
-    code, _ = assemble(
+    code, _ = Assembler(MPU()).assemble_program(
         f"""
   CMP #$FF
   BNE back
@@ -524,7 +525,7 @@ def _rsid(song, irq="CLI"):
     """``song`` as an RSID (play 0) whose init installs a KERNAL IRQ calling play."""
     init, entry = song.init_addr, Player(song).layout.entry
     org = song.load_addr + len(song.image)
-    code, _ = assemble(
+    code, _ = Assembler(MPU()).assemble_program(
         f"""
   JSR ${init:04X}
   SEI
